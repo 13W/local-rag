@@ -16,6 +16,7 @@ Options:
 `.trim();
 
 const { positionals, values } = parseArgs({
+  args: process.argv.slice(2).filter((a) => a !== "--"),
   options: {
     "generate-descriptions": { type: "boolean", default: false },
   },
@@ -36,6 +37,7 @@ await indexer.ensureCollection();
 if (cmd === "index") {
   const root = resolve(arg2 ?? ".");
   await indexer.indexAll(root);
+  process.exit(0);
 
 } else if (cmd === "watch") {
   const root = resolve(arg2 ?? ".");
@@ -47,9 +49,11 @@ if (cmd === "index") {
 
 } else if (cmd === "clear") {
   await indexer.clear();
+  process.exit(0);
 
 } else if (cmd === "stats") {
   await indexer.stats();
+  process.exit(0);
 
 } else if (cmd === "file") {
   if (!arg2) { process.stderr.write("Usage: cli.js file <abs-path> [root]\n"); process.exit(1); }
@@ -57,6 +61,7 @@ if (cmd === "index") {
   const root    = resolve(arg3 ?? ".");
   const n = await indexer.indexFile(absPath, root);
   process.stdout.write(`${n} chunks indexed\n`);
+  process.exit(0);
 
 } else {
   process.stderr.write(`Unknown command: ${cmd}\n\n${USAGE}\n`);

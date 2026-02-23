@@ -1,6 +1,12 @@
 import { parseArgs } from "node:util";
 
+// pnpm passes its own "--" separator into process.argv when using
+// `pnpm <script> -- <args>`.  Strip it so that named options that follow
+// are not silently treated as positionals by parseArgs.
+const rawArgs = process.argv.slice(2).filter((a) => a !== "--");
+
 const { values } = parseArgs({
+  args: rawArgs,
   options: {
     "qdrant-url":     { type: "string", default: "http://localhost:6333" },
     "ollama-url":     { type: "string", default: "http://localhost:11434" },

@@ -1,0 +1,124 @@
+{
+  // "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+  "$schema": "https://biomejs.dev/schemas/latest/schema.json",
+  "root": true,
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "defaultBranch": "development",
+    "useIgnoreFile": true
+  },
+  "files": {
+    "ignoreUnknown": true,
+    "includes": [
+      "biome.json",
+      "biome.jsonc",
+      "src/**/*.{js,ts}"
+    ],
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "correctness": {
+        "noUnusedVariables": "warn",
+        "useSingleJsDocAsterisk": "error",
+        "noConstructorReturn": "off"
+      },
+      "style": {
+        "noUselessElse": "error",
+        "useImportType": "on",
+        "useNodejsImportProtocol": "error"
+      },
+      "suspicious": {
+        "noConsole": "error", // "error",
+        "noVar": "error",
+        "useIterableCallbackReturn": "off",
+        "noThenProperty": "off",
+        "noAssignInExpressions": "off"
+      },
+      "complexity": {
+        "noUselessCatch": "error",
+        "noThisInStatic": "off"
+      }
+    }
+  },
+  "assist": {
+    "actions": {
+      "source": {
+        "organizeImports": "off"
+      }
+    }
+  },
+  "formatter": {
+    "formatWithErrors": true,
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 120,
+    "bracketSpacing": true,
+    "bracketSameLine": false,
+    "useEditorconfig": true,
+    "expand": "auto"
+  },
+  "json": {
+    "formatter": {
+      "enabled": true,
+      "expand": "auto"
+    },
+    "linter": {
+      "enabled": true
+    },
+    "assist": {
+      "enabled": true
+    },
+    "parser": {
+      "allowComments": false,
+      "allowTrailingCommas": false
+    },
+  },
+  "javascript": {
+    "formatter": {
+      "enabled": true,
+      "quoteStyle": "single",
+      "jsxQuoteStyle": "single",
+      "quoteProperties": "asNeeded",
+      "bracketSpacing": true,
+      "semicolons": "asNeeded",
+      "arrowParentheses": "always",
+      "attributePosition":"auto",
+      "bracketSameLine": true,
+      "expand":"auto",
+      "operatorLinebreak":"after",
+      "trailingCommas":"all",
+      "indentStyle": "space",
+      "indentWidth": 2,
+    },
+    "assist": {
+      "enabled": true,
+    },
+    // "globals": [],
+    // "jsxRuntime":"transparent",
+    "linter": {
+      "enabled": true,
+    },
+    "parser": {
+      "gritMetavariables": false,
+      "jsxEverywhere": false,
+      "unsafeParameterDecoratorsEnabled": null,
+    }
+  },
+  "graphql": {
+    "assist": {
+      "enabled": true,
+    },
+    "formatter": {
+      "bracketSpacing": true,
+      "indentStyle": "space",
+      "indentWidth": 2,
+      "quoteStyle": "single",
+    },
+    "linter": {
+      "enabled": true,
+    }
+  }
+}

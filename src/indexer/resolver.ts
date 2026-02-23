@@ -37,7 +37,10 @@ export class ImportResolver {
 
     const tsPath = opts.tsconfigPath ?? join(opts.root, "tsconfig.json");
     if (existsSync(tsPath)) {
-      const raw      = readFileSync(tsPath, "utf8").replace(/\/\/[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
+      const raw = readFileSync(tsPath, "utf8")
+        .replace(/\/\/[^\n]*/g, "")           // strip // comments
+        .replace(/\/\*[\s\S]*?\*\//g, "")     // strip /* */ comments
+        .replace(/,(\s*[}\]])/g, "$1");        // strip trailing commas (JSONC)
       const tsconfig = JSON.parse(raw) as TsConfig;
       const opts2    = tsconfig.compilerOptions ?? {};
       if (opts2.baseUrl) {
