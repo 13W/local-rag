@@ -40,6 +40,34 @@ export async function embedOne(text: string): Promise<number[]> {
   return first;
 }
 
+/**
+ * Generate a 1-2 sentence English description of a code chunk using the LLM.
+ * Returns empty string on failure.
+ */
+export async function generateDescription(chunk: {
+  content:   string;
+  name:      string;
+  chunkType: string;
+  language:  string;
+}): Promise<string> {
+  const preview = chunk.content.slice(0, 600);
+  const prompt =
+    `Describe briefly in 1-2 sentences what this ${chunk.language} ${chunk.chunkType} ` +
+    `"${chunk.name}" does:\n\n${preview}`;
+
+  const resp = await fetch(`${cfg.ollamaUrl}/api/generate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ model: cfg.llmModel, prompt, stream: false }),
+    signal: AbortSignal.timeout(60_000),
+  });
+
+  if (!resp.ok) return "";
+
+  const data = (await resp.json()) as { response: string };
+  return data.response.trim().slice(0, 500);
+}
+
 export type Candidate = [number, string, string | number, string, string, string];
 
 export async function llmFilter(

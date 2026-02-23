@@ -13,16 +13,22 @@ export interface MemoryPayload {
 }
 
 export interface CodeChunkPayload {
-  content:    string;
-  file_path:  string;
-  chunk_type: string;
-  name:       string;
-  signature:  string;
-  start_line: number;
-  end_line:   number;
-  language:   string;
-  jsdoc:      string;
-  project_id: string;
+  content:        string;
+  file_path:      string;
+  chunk_type:     string;
+  name:           string;
+  signature:      string;
+  start_line:     number;
+  end_line:       number;
+  language:       string;
+  jsdoc:          string;
+  project_id:     string;
+  file_hash?:     string;
+  description?:   string;
+  parent_id?:     string;
+  children_ids?:  string[];
+  is_parent?:     boolean;
+  imports?:       string[];
 }
 
 export interface StoreMemoryParams {
@@ -35,13 +41,18 @@ export interface StoreMemoryParams {
 }
 
 export interface CodeChunk {
-  content:   string;
-  filePath:  string;
-  chunkType: string;
-  name:      string;
-  signature: string;
-  startLine: number;
-  endLine:   number;
-  language:  string;
-  jsdoc:     string;
+  content:    string;
+  filePath:   string;
+  chunkType:  string;
+  name:       string;
+  signature:  string;
+  startLine:  number;
+  endLine:    number;
+  language:   string;
+  jsdoc:      string;
+  imports?:   string[];
+  /** "parent" = large container that recurses into children; "child" = lives inside a parent */
+  chunkRole?: "parent" | "child" | "regular";
+  /** "{filePath}:{startLine}" of the enclosing parent chunk */
+  parentKey?: string;
 }

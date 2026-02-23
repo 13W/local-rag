@@ -16,6 +16,7 @@ interface LanguageDef {
   readonly containerNodes: ReadonlySet<string>;
   readonly extractName:    (node: SyntaxNode) => string;
   readonly docStyle:       "jsdoc" | "slashslash" | "none";
+  readonly importNode?:    string;
 }
 
 // ── extension map ─────────────────────────────────────────────────────────────
@@ -115,6 +116,7 @@ const TS_DEF: LanguageDef = {
   containerNodes: new Set(["class_declaration", "abstract_class_declaration", "interface_declaration"]),
   extractName: extractNameIdentifier,
   docStyle: "jsdoc",
+  importNode: "import_statement",
 };
 
 const RUST_DEF: LanguageDef = {
@@ -137,6 +139,7 @@ const RUST_DEF: LanguageDef = {
   containerNodes: new Set(["impl_item", "struct_item", "trait_item", "mod_item"]),
   extractName: extractNameField,
   docStyle: "slashslash",
+  importNode: "use_declaration",
 };
 
 const GO_DEF: LanguageDef = {
@@ -155,6 +158,7 @@ const GO_DEF: LanguageDef = {
   containerNodes: new Set(["type_declaration"]),
   extractName: extractNameField,
   docStyle: "slashslash",
+  importNode: "import_declaration",
 };
 
 const LANG_DEFS: Record<string, LanguageDef> = {
@@ -233,6 +237,66 @@ function extractDoc(lines: string[], row: number, style: LanguageDef["docStyle"]
   return "";
 }
 
+// ── import extraction ─────────────────────────────────────────────────────────
+
+/**
+ * Walk the AST root node and extract raw import source strings.
+ * For TypeScript/JS: import_statement nodes contain a `string` with the module path.
+ * For Rust: use_declaration nodes contain an identifier path.
+ * For Go: import_declaration nodes contain interpreted_string_literal children.
+ */
+function extractImports(root: SyntaxNode, language: string): string[] {
+  const importNode = LANG_DEFS[language]?.importNode;
+  if (!importNode) return [];
+
+  const imports: string[] = [];
+
+  function walk(node: SyntaxNode): void {
+    if (node.type === importNode) {
+      const src = extractImportSource(node, language);
+      if (src) imports.push(src);
+      return; // don't recurse into import nodes
+    }
+    for (const child of node.children) walk(child);
+  }
+  walk(root);
+  return imports;
+}
+
+function extractImportSource(node: SyntaxNode, language: string): string {
+  if (language === "typescript") {
+    // import_statement: import ... from "source" or export ... from "source"
+    for (const child of node.children) {
+      if (child.type === "string") {
+        // Strip quotes
+        const raw = child.text;
+        return raw.slice(1, raw.length - 1);
+      }
+    }
+  } else if (language === "rust") {
+    // use_declaration: use some::path;
+    // Just return the path text (first non-keyword child)
+    for (const child of node.children) {
+      if (child.type !== "use" && child.type !== ";") return child.text;
+    }
+  } else if (language === "go") {
+    // import_declaration may have import_spec children with interpreted_string_literal
+    for (const child of node.children) {
+      if (child.type === "interpreted_string_literal") {
+        const raw = child.text;
+        return raw.slice(1, raw.length - 1);
+      }
+      for (const grandchild of child.children) {
+        if (grandchild.type === "interpreted_string_literal") {
+          const raw = grandchild.text;
+          return raw.slice(1, raw.length - 1);
+        }
+      }
+    }
+  }
+  return "";
+}
+
 // ── AST walker ────────────────────────────────────────────────────────────────
 
 function walkTree(
@@ -241,15 +305,17 @@ function walkTree(
   lines: string[],
   chunks: CodeChunk[],
   def: LanguageDef,
+  parentKey?: string,
 ): void {
   if (def.extractNodes.has(node.type)) {
     const text = node.text;
     if (text.length < MIN_CHUNK_CHARS) return;
 
+    const myKey = `${filePath}:${node.startPosition.row + 1}`;
     const isLargeContainer = def.containerNodes.has(node.type) && text.length > MAX_CHUNK_CHARS;
 
     if (isLargeContainer) {
-      chunks.push({
+      const chunk: CodeChunk = {
         content:   text.slice(0, MAX_CHUNK_CHARS) + "\n  // ...",
         filePath,
         chunkType: def.chunkTypeMap[node.type] ?? "block",
@@ -259,12 +325,16 @@ function walkTree(
         endLine:   node.endPosition.row + 1,
         language:  def.language,
         jsdoc:     extractDoc(lines, node.startPosition.row, def.docStyle),
-      });
-      for (const child of node.children) walkTree(child, filePath, lines, chunks, def);
+        chunkRole: "parent",
+      };
+      if (parentKey !== undefined) chunk.parentKey = parentKey;
+      chunks.push(chunk);
+      // Recurse with children knowing their parent's key
+      for (const child of node.children) walkTree(child, filePath, lines, chunks, def, myKey);
       return;
     }
 
-    chunks.push({
+    const chunk: CodeChunk = {
       content:   text.length > MAX_CHUNK_CHARS ? text.slice(0, MAX_CHUNK_CHARS) + "\n// ..." : text,
       filePath,
       chunkType: def.chunkTypeMap[node.type] ?? "block",
@@ -274,11 +344,14 @@ function walkTree(
       endLine:   node.endPosition.row + 1,
       language:  def.language,
       jsdoc:     extractDoc(lines, node.startPosition.row, def.docStyle),
-    });
+      chunkRole: parentKey !== undefined ? "child" : "regular",
+    };
+    if (parentKey !== undefined) chunk.parentKey = parentKey;
+    chunks.push(chunk);
     return; // do not recurse into this node's children
   }
 
-  for (const child of node.children) walkTree(child, filePath, lines, chunks, def);
+  for (const child of node.children) walkTree(child, filePath, lines, chunks, def, parentKey);
 }
 
 // ── data format parsers ───────────────────────────────────────────────────────
@@ -471,8 +544,37 @@ export async function parseFile(filePath: string, source: string): Promise<CodeC
   if (!def) return [];
 
   const tree  = parser.parse(source)!;
+  const root  = tree.rootNode as unknown as SyntaxNode;
   const lines = source.split("\n");
   const chunks: CodeChunk[] = [];
-  walkTree(tree.rootNode as unknown as SyntaxNode, filePath, lines, chunks, def);
+  walkTree(root, filePath, lines, chunks, def);
+
+  // Extract imports for this file and attach to each chunk (only the first chunk
+  // per file really needs them, but the indexer reads them from chunks[0]).
+  const imports = extractImports(root, def.language);
+  if (imports.length > 0 && chunks.length > 0) {
+    // Attach to all chunks so the indexer can see them without special-casing.
+    for (const chunk of chunks) {
+      chunk.imports = imports;
+    }
+  }
+
   return chunks;
+}
+
+/**
+ * Extract raw import source strings from a source file without full chunk parsing.
+ * Used by the indexer to build the dependency graph.
+ */
+export async function extractFileImports(filePath: string, source: string): Promise<string[]> {
+  const ext   = extname(filePath).toLowerCase();
+  const entry = EXT_MAP[ext];
+  if (!entry || entry.kind === "data") return [];
+
+  const parser = await getParser(entry.wasmKey);
+  const def    = LANG_DEFS[entry.defKey];
+  if (!def) return [];
+
+  const tree = parser.parse(source)!;
+  return extractImports(tree.rootNode as unknown as SyntaxNode, def.language);
 }

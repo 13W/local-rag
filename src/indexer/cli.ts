@@ -10,9 +10,18 @@ Usage:
   node dist/indexer/cli.js clear                — remove all indexed chunks for this project
   node dist/indexer/cli.js stats                — show collection stats
   node dist/indexer/cli.js file   <abs> <root>  — index a single file
+
+Options:
+  --generate-descriptions   Generate LLM descriptions for code chunks (slow, uses --llm-model)
 `.trim();
 
-const { positionals } = parseArgs({ options: {}, allowPositionals: true, strict: false });
+const { positionals, values } = parseArgs({
+  options: {
+    "generate-descriptions": { type: "boolean", default: false },
+  },
+  allowPositionals: true,
+  strict: false,
+});
 const [cmd, arg2, arg3] = positionals;
 
 if (!cmd) {
@@ -20,7 +29,8 @@ if (!cmd) {
   process.exit(1);
 }
 
-const indexer = new CodeIndexer();
+const generateDescriptions = values["generate-descriptions"] === true;
+const indexer = new CodeIndexer({ generateDescriptions });
 await indexer.ensureCollection();
 
 if (cmd === "index") {

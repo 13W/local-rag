@@ -6,12 +6,15 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 
 import { ensureCollections } from "./qdrant.js";
-import { rememberTool }    from "./tools/remember.js";
-import { recallTool }      from "./tools/recall.js";
-import { searchCodeTool }  from "./tools/search_code.js";
-import { forgetTool }      from "./tools/forget.js";
-import { consolidateTool } from "./tools/consolidate.js";
-import { statsTool }       from "./tools/stats.js";
+import { rememberTool }         from "./tools/remember.js";
+import { recallTool }           from "./tools/recall.js";
+import { searchCodeTool }       from "./tools/search_code.js";
+import { forgetTool }           from "./tools/forget.js";
+import { consolidateTool }      from "./tools/consolidate.js";
+import { statsTool }            from "./tools/stats.js";
+import { getFileContextTool }   from "./tools/get_file_context.js";
+import { getDependenciesTool }  from "./tools/get_dependencies.js";
+import { projectOverviewTool }  from "./tools/project_overview.js";
 
 // ── Tool definitions (JSON Schema) ──────────────────────────────────────────
 
@@ -55,14 +58,15 @@ const TOOLS = [
   {
     name: "search_code",
     description:
-      "Semantic search over the codebase (RAG).\n\nArgs:\n  query: What to find — natural language description\n  file_path: Filter by file path substring: \"src/auth\"\n  chunk_type: Filter: \"function\", \"class\", \"interface\", \"type_alias\", \"enum\"\n  limit: Number of results (1-20)",
+      "Semantic search over the codebase (RAG).\n\nArgs:\n  query: What to find — natural language description\n  file_path: Filter by file path substring: \"src/auth\"\n  chunk_type: Filter: \"function\", \"class\", \"interface\", \"type_alias\", \"enum\"\n  limit: Number of results (1-20)\n  search_mode: \"hybrid\" (default, RRF fusion), \"code\" (code vector), \"semantic\" (description vector)",
     inputSchema: {
       type: "object" as const,
       properties: {
-        query:      { type: "string",  description: "Natural language description" },
-        file_path:  { type: "string",  description: "File path substring filter",  default: "" },
-        chunk_type: { type: "string",  description: "function | class | interface | type_alias | enum", default: "" },
-        limit:      { type: "integer", description: "Max results",                  default: 10 },
+        query:       { type: "string",  description: "Natural language description" },
+        file_path:   { type: "string",  description: "File path substring filter",  default: "" },
+        chunk_type:  { type: "string",  description: "function | class | interface | type_alias | enum", default: "" },
+        limit:       { type: "integer", description: "Max results",                  default: 10 },
+        search_mode: { type: "string",  description: "hybrid | code | semantic",     default: "hybrid" },
       },
       required: ["query"],
     },
@@ -102,6 +106,46 @@ const TOOLS = [
       required: [],
     },
   },
+  {
+    name: "get_file_context",
+    description:
+      "Read a file or a fragment around a specific symbol/line range.\n\nArgs:\n  file_path: Relative path to the file (from project root)\n  symbol_name: Name of a function/class/type to centre the view on\n  start_line: First line of the window (if no symbol_name)\n  end_line: Last line of the window (if no symbol_name)\n  context_lines: Lines of context around the symbol (default 10)",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        file_path:     { type: "string",  description: "Relative file path from project root" },
+        symbol_name:   { type: "string",  description: "Name of function/class/type to find", default: "" },
+        start_line:    { type: "integer", description: "Start of line window",                 default: 0 },
+        end_line:      { type: "integer", description: "End of line window",                   default: 0 },
+        context_lines: { type: "integer", description: "Lines of context around symbol",       default: 10 },
+      },
+      required: ["file_path"],
+    },
+  },
+  {
+    name: "get_dependencies",
+    description:
+      "Show import dependencies of a file.\n\nArgs:\n  file_path: Relative path to the file\n  direction: \"imports\" (what it imports), \"imported_by\" (who imports it), \"both\"\n  depth: Traversal depth 1–5 (default 1)",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        file_path:  { type: "string",  description: "Relative file path" },
+        direction:  { type: "string",  description: "imports | imported_by | both", default: "both" },
+        depth:      { type: "integer", description: "Traversal depth 1–5",          default: 1 },
+      },
+      required: ["file_path"],
+    },
+  },
+  {
+    name: "project_overview",
+    description:
+      "Return a high-level map of the project: directory structure, entry points, language stats, index size, and most-imported modules.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {},
+      required: [],
+    },
+  },
 ];
 
 // ── Argument helpers ─────────────────────────────────────────────────────────
@@ -114,7 +158,7 @@ function bool(v: unknown, def: boolean): boolean { return typeof v === "boolean"
 // ── Server ───────────────────────────────────────────────────────────────────
 
 const server = new Server(
-  { name: "Claude Memory + Code RAG", version: "1.0.0" },
+  { name: "Claude Memory + Code RAG", version: "2.0.0" },
   { capabilities: { tools: {} } }
 );
 
@@ -148,10 +192,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     });
   } else if (name === "search_code") {
     text = await searchCodeTool({
-      query:      str(a["query"]),
-      file_path:  str(a["file_path"],  ""),
-      chunk_type: str(a["chunk_type"], ""),
-      limit:      int(a["limit"],      10),
+      query:       str(a["query"]),
+      file_path:   str(a["file_path"],   ""),
+      chunk_type:  str(a["chunk_type"],  ""),
+      limit:       int(a["limit"],       10),
+      search_mode: str(a["search_mode"], "hybrid"),
     });
   } else if (name === "forget") {
     text = await forgetTool({ memory_id: str(a["memory_id"]) });
@@ -164,6 +209,22 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     });
   } else if (name === "stats") {
     text = await statsTool();
+  } else if (name === "get_file_context") {
+    text = await getFileContextTool({
+      file_path:     str(a["file_path"]),
+      symbol_name:   str(a["symbol_name"],   ""),
+      start_line:    int(a["start_line"],    0),
+      end_line:      int(a["end_line"],      0),
+      context_lines: int(a["context_lines"], 10),
+    });
+  } else if (name === "get_dependencies") {
+    text = await getDependenciesTool({
+      file_path: str(a["file_path"]),
+      direction: str(a["direction"], "both"),
+      depth:     int(a["depth"],     1),
+    });
+  } else if (name === "project_overview") {
+    text = await projectOverviewTool();
   } else {
     text = `unknown tool: ${name}`;
   }
