@@ -1,16 +1,18 @@
 import { watch, existsSync } from "node:fs";
-import { resolve, join } from "node:path";
+import { resolve, join, relative } from "node:path";
 import type { CodeIndexer } from "./indexer.js";
+import { cfg } from "../config.js";
 
 export function startWatcher(root: string, indexer: CodeIndexer): void {
   const absRoot = resolve(root);
 
   watch(absRoot, { recursive: true }, (event, filename) => {
     if (!filename) return;
-    const absPath = resolve(join(absRoot, filename));
+    const absPath  = resolve(join(absRoot, filename));
     if (indexer.shouldSkip(absPath)) return;
 
-    const relPath = filename.replace(/\\/g, "/");
+    const pathBase = cfg.projectRoot ? resolve(cfg.projectRoot) : absRoot;
+    const relPath  = relative(pathBase, absPath).replace(/\\/g, "/");
 
     if (existsSync(absPath)) {
       indexer

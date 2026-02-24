@@ -1,5 +1,5 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
-import { join, relative, extname, basename } from "node:path";
+import { join, relative, resolve, extname, basename } from "node:path";
 import { createHash } from "node:crypto";
 import { QdrantClient } from "@qdrant/js-client-rest";
 import { cfg } from "../config.js";
@@ -165,7 +165,8 @@ export class CodeIndexer {
   }
 
   async indexFile(absPath: string, root: string): Promise<number> {
-    const relPath = relative(root, absPath).replace(/\\/g, "/");
+    const pathBase = cfg.projectRoot ? resolve(cfg.projectRoot) : root;
+    const relPath  = relative(pathBase, absPath).replace(/\\/g, "/");
     const source  = readFileSync(absPath, "utf8");
     const newHash = hashSource(source);
 
@@ -328,8 +329,10 @@ export class CodeIndexer {
   }
 
   async indexAll(root: string): Promise<void> {
-    // Initialise resolver for dep graph
-    this.resolver = new ImportResolver({ root });
+    const pathBase = cfg.projectRoot ? resolve(cfg.projectRoot) : root;
+    // Initialise resolver for dep graph — use pathBase so imports resolve
+    // relative to project root, and tsconfig.json is found in the right place
+    this.resolver = new ImportResolver({ root: pathBase });
     const files = this.collectFiles(root);
     process.stderr.write(`[indexer] Found ${files.length} files\n`);
 
@@ -344,6 +347,7 @@ export class CodeIndexer {
       if ((i + 1) % 20 === 0) {
         process.stderr.write(`[indexer] [${i + 1}/${files.length}] ${total} chunks\n`);
       }
+      process.stderr.write(`[indexer] [${i + 1}/${files.length}] ${total} chunks: ${file} done.\n`)
     }
 
     // Invalidate cached project overview since structure may have changed
