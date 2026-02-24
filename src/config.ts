@@ -35,6 +35,7 @@ type ConfigFile = Partial<{
   "llm-model":              string;
   "project-root":           string;
   "generate-descriptions":  boolean;
+  "include-paths":          string[];
 }>;
 
 let file: ConfigFile = {};
@@ -72,5 +73,8 @@ export const cfg = Object.freeze({
   llmModel:             str("llm-model",    "gemma3n:e2b"),
   projectRoot:          str("project-root", configDir ?? ""),
   generateDescriptions: bool("generate-descriptions", false),
+  includePaths:         (file["include-paths"] ?? []) as string[],
 });
-process.stderr.write(`[config] projectId=${cfg.projectId} projectRoot=${cfg.projectRoot || "(cwd)"}\n`);
+process.stderr.write(
+  `[config] projectId=${cfg.projectId} projectRoot=${cfg.projectRoot || "(cwd)"} includePaths=${cfg.includePaths.length}\n`
+);

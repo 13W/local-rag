@@ -5,7 +5,8 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/server.js",
-    "index": "node dist/indexer/cli.js"
+    "index": "node dist/indexer/cli.js index",
+    "watch": "node dist/indexer/cli.js watch"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.26.0",

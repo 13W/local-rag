@@ -1,5 +1,6 @@
 import { parseArgs } from "node:util";
-import { resolve } from "node:path";
+import { resolve, join } from "node:path";
+import { glob, lstat } from "node:fs/promises";
 import { CodeIndexer } from "./indexer.js";
 import { startWatcher } from "./watcher.js";
 import { cfg } from "../config.js";
@@ -38,16 +39,34 @@ if (!cmd) {
 const indexer = new CodeIndexer({ generateDescriptions: cfg.generateDescriptions });
 await indexer.ensureCollection();
 
+async function expandRoots(root: string): Promise<string[]> {
+  if (!cfg.includePaths.length) return [root];
+  const base = cfg.projectRoot ? resolve(cfg.projectRoot) : root;
+  const results: string[] = [];
+  for await (const match of glob(cfg.includePaths, { cwd: base })) {
+    const abs = join(base, match);
+    const s = await lstat(abs);
+    if (s.isDirectory()) results.push(abs);
+  }
+  if (!results.length) {
+    process.stderr.write(`[cli] Warning: include-paths matched no directories under ${base}\n`);
+  }
+  return results;
+}
+
 if (cmd === "index") {
-  const root = resolve(arg2 ?? ".");
-  await indexer.indexAll(root);
+  const root  = resolve(arg2 ?? ".");
+  const roots = await expandRoots(root);
+  for (const r of roots) await indexer.indexAll(r);
   process.exit(0);
 
 } else if (cmd === "watch") {
-  const root = resolve(arg2 ?? ".");
-  await indexer.indexAll(root);
-  startWatcher(root, indexer);
-  // keep process alive; Ctrl-C to stop
+  const root  = resolve(arg2 ?? ".");
+  const roots = await expandRoots(root);
+  for (const r of roots) {
+    await indexer.indexAll(r);
+    startWatcher(r, indexer);
+  }
   process.on("SIGINT",  () => process.exit(0));
   process.on("SIGTERM", () => process.exit(0));
 
