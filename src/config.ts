@@ -20,6 +20,12 @@ const { values } = parseArgs({
     "llm-model":             { type: "string" },
     "project-root":          { type: "string" },
     "generate-descriptions": { type: "boolean" },
+    "embed-provider":        { type: "string" },
+    "embed-api-key":         { type: "string" },
+    "embed-url":             { type: "string" },
+    "llm-provider":          { type: "string" },
+    "llm-api-key":           { type: "string" },
+    "llm-url":               { type: "string" },
   },
   allowPositionals: true,
   strict: false,
@@ -36,6 +42,12 @@ type ConfigFile = Partial<{
   "project-root":           string;
   "generate-descriptions":  boolean;
   "include-paths":          string[];
+  "embed-provider":         string;
+  "embed-api-key":          string;
+  "embed-url":              string;
+  "llm-provider":           string;
+  "llm-api-key":            string;
+  "llm-url":                string;
 }>;
 
 let file: ConfigFile = {};
@@ -68,9 +80,15 @@ export const cfg = Object.freeze({
   ollamaUrl:            str("ollama-url",   "http://localhost:11434"),
   embedModel:           str("embed-model",  "mxbai-embed-large"),
   embedDim:             parseInt(str("embed-dim", "1024"), 10),
+  embedProvider:        str("embed-provider", "ollama") as "ollama" | "openai" | "voyage",
+  embedApiKey:          str("embed-api-key",  ""),
+  embedUrl:             str("embed-url",       ""),
   agentId:              str("agent-id",     "default"),
   projectId:            str("project-id",   "default"),
   llmModel:             str("llm-model",    "gemma3n:e2b"),
+  llmProvider:          str("llm-provider", "ollama") as "ollama" | "anthropic" | "openai",
+  llmApiKey:            str("llm-api-key",  ""),
+  llmUrl:               str("llm-url",       ""),
   projectRoot:          str("project-root", configDir ?? ""),
   generateDescriptions: bool("generate-descriptions", false),
   includePaths:         (file["include-paths"] ?? []) as string[],
