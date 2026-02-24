@@ -3,9 +3,5 @@
 dist/
 node_modules/
 types/
-data/
-memory/
-*.db
-.env
-__pycache__/
-*.pyc
+.mcp.json
+.memory.json
