@@ -316,7 +316,7 @@ function walkTree(
 
     if (isLargeContainer) {
       const chunk: CodeChunk = {
-        content:   text.slice(0, MAX_CHUNK_CHARS) + "\n  // ...",
+        content:   text,
         filePath,
         chunkType: def.chunkTypeMap[node.type] ?? "block",
         name:      def.extractName(node),
@@ -335,7 +335,7 @@ function walkTree(
     }
 
     const chunk: CodeChunk = {
-      content:   text.length > MAX_CHUNK_CHARS ? text.slice(0, MAX_CHUNK_CHARS) + "\n// ..." : text,
+      content:   text,
       filePath,
       chunkType: def.chunkTypeMap[node.type] ?? "block",
       name:      def.extractName(node),
@@ -364,7 +364,7 @@ function parseJsonFile(filePath: string, source: string): CodeChunk[] {
 
   if (source.length <= MAX_CHUNK_CHARS || typeof data !== "object" || data === null || Array.isArray(data)) {
     return [{
-      content:   source.length > MAX_CHUNK_CHARS ? source.slice(0, MAX_CHUNK_CHARS) + "\n// ..." : source,
+      content:   source,
       filePath,
       chunkType: "document",
       name:      stem,
@@ -377,7 +377,7 @@ function parseJsonFile(filePath: string, source: string): CodeChunk[] {
   }
 
   const chunks: CodeChunk[] = [{
-    content:   source.slice(0, MAX_CHUNK_CHARS) + "\n// ...",
+    content:   source,
     filePath,
     chunkType: "document",
     name:      stem,
@@ -392,7 +392,7 @@ function parseJsonFile(filePath: string, source: string): CodeChunk[] {
     if (typeof value !== "object" || value === null) continue;
     const serialized = JSON.stringify(value, null, 2);
     chunks.push({
-      content:   serialized.length > MAX_CHUNK_CHARS ? serialized.slice(0, MAX_CHUNK_CHARS) + "\n// ..." : serialized,
+      content:   serialized,
       filePath,
       chunkType: "document",
       name:      key,
@@ -444,7 +444,7 @@ function parseYaml(filePath: string, source: string): CodeChunk[] {
     }
 
     chunks.push({
-      content:   serialized.slice(0, MAX_CHUNK_CHARS) + "\n// ...",
+      content:   serialized,
       filePath,
       chunkType: kind,
       name,
@@ -459,7 +459,7 @@ function parseYaml(filePath: string, source: string): CodeChunk[] {
       if (typeof value !== "object" || value === null) continue;
       const sec = JSON.stringify(value, null, 2);
       chunks.push({
-        content:   sec.length > MAX_CHUNK_CHARS ? sec.slice(0, MAX_CHUNK_CHARS) + "\n// ..." : sec,
+        content:   sec,
         filePath,
         chunkType: kind,
         name:      `${name}/${key}`,
@@ -495,7 +495,7 @@ function parseTomlFile(filePath: string, source: string): CodeChunk[] {
   }
 
   const chunks: CodeChunk[] = [{
-    content:   source.slice(0, MAX_CHUNK_CHARS) + "\n// ...",
+    content:   source,
     filePath,
     chunkType: "document",
     name:      stem,
@@ -510,7 +510,7 @@ function parseTomlFile(filePath: string, source: string): CodeChunk[] {
     if (typeof value !== "object" || value === null || Array.isArray(value)) continue;
     const serialized = JSON.stringify(value, null, 2);
     chunks.push({
-      content:   serialized.length > MAX_CHUNK_CHARS ? serialized.slice(0, MAX_CHUNK_CHARS) + "\n// ..." : serialized,
+      content:   serialized,
       filePath,
       chunkType: "table",
       name:      key,
