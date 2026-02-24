@@ -2,6 +2,7 @@ import { parseArgs } from "node:util";
 import { resolve } from "node:path";
 import { CodeIndexer } from "./indexer.js";
 import { startWatcher } from "./watcher.js";
+import { cfg } from "../config.js";
 
 const USAGE = `
 Usage:
@@ -13,13 +14,14 @@ Usage:
   node dist/indexer/cli.js migrate-imports <root>   — fix imports paths in existing index
 
 Options:
-  --generate-descriptions   Generate LLM descriptions for code chunks (slow, uses --llm-model)
+  -c, --config <file>         Load options from a JSON config file
+  --generate-descriptions     Generate LLM descriptions for code chunks (slow, uses --llm-model)
 `.trim();
 
-const { positionals, values } = parseArgs({
+const { positionals } = parseArgs({
   args: process.argv.slice(2).filter((a) => a !== "--"),
   options: {
-    "generate-descriptions": { type: "boolean", default: false },
+    "config": { type: "string", short: "c" },
   },
   allowPositionals: true,
   strict: false,
@@ -31,8 +33,7 @@ if (!cmd) {
   process.exit(1);
 }
 
-const generateDescriptions = values["generate-descriptions"] === true;
-const indexer = new CodeIndexer({ generateDescriptions });
+const indexer = new CodeIndexer({ generateDescriptions: cfg.generateDescriptions });
 await indexer.ensureCollection();
 
 if (cmd === "index") {
