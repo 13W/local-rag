@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { CodeIndexer } from "./indexer.js";
 import { startWatcher } from "./watcher.js";
 import { cfg } from "../config.js";
+import { migrateMeta } from "../storage.js";
 
 const USAGE = `
 Usage:
@@ -12,6 +13,7 @@ Usage:
   node dist/indexer/cli.js stats                — show collection stats
   node dist/indexer/cli.js file   <abs> <root>  — index a single file
   node dist/indexer/cli.js migrate-imports <root>   — fix imports paths in existing index
+  node dist/indexer/cli.js migrate-meta             — add missing payload fields to memory points (no re-embedding)
 
 Options:
   -c, --config <file>         Load options from a JSON config file
@@ -68,6 +70,11 @@ if (cmd === "index") {
 } else if (cmd === "migrate-imports") {
   const root = resolve(arg2 ?? ".");
   await indexer.migrateImports(root);
+  process.exit(0);
+
+} else if (cmd === "migrate-meta") {
+  const { updated, total } = await migrateMeta(cfg.projectId);
+  process.stdout.write(`[migrate-meta] ${updated} of ${total} memory points updated\n`);
   process.exit(0);
 
 } else {

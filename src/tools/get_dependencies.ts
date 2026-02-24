@@ -1,5 +1,5 @@
 import { cfg } from "../config.js";
-import { getDeps, getReverseDeps, getTransitiveDeps } from "../redis.js";
+import { getDeps, getReverseDeps, getTransitiveDeps } from "../storage.js";
 
 export interface GetDependenciesArgs {
   file_path: string;

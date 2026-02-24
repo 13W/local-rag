@@ -11,7 +11,7 @@ import {
   setDeps,
   clearDeps,
   invalidateProjectOverview,
-} from "../redis.js";
+} from "../storage.js";
 import type { CodeChunk } from "../types.js";
 import { CODE_VECTORS } from "../qdrant.js";
 

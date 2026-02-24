@@ -30,7 +30,15 @@ async function ensureCodeChunks(): Promise<void> {
     // Named vectors: the object will have "code_vector" key.
     // Old single vector: it has a "size" key directly.
     const hasNamedVectors = vectors !== undefined && CODE_VECTORS.code in vectors;
-    if (hasNamedVectors) return; // already migrated
+    if (hasNamedVectors) {
+      // Ensure the imports keyword index exists on the existing collection (idempotent).
+      await qd.createPayloadIndex("code_chunks", {
+        field_name:   "imports",
+        field_schema: "keyword",
+        wait:         true,
+      }).catch(() => undefined);
+      return;
+    }
 
     // Delete old collection and re-create below.
     process.stderr.write(
@@ -46,7 +54,7 @@ async function ensureCodeChunks(): Promise<void> {
     },
   });
 
-  for (const field of ["file_path", "chunk_type", "language", "project_id", "parent_id"]) {
+  for (const field of ["file_path", "chunk_type", "language", "project_id", "parent_id", "imports"]) {
     await qd.createPayloadIndex("code_chunks", {
       field_name:   field,
       field_schema: "keyword",

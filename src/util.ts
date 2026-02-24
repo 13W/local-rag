@@ -2,7 +2,6 @@ import { createHash } from "node:crypto";
 import type { StoreMemoryParams } from "./types.js";
 import { cfg } from "./config.js";
 import { qd } from "./qdrant.js";
-import { insertMeta } from "./redis.js";
 import { embedOne } from "./embedder.js";
 
 export function colForType(memoryType: string): string {
@@ -46,6 +45,10 @@ export async function storeMemory(params: StoreMemoryParams): Promise<string> {
     ? tags.split(",").map((t) => t.trim()).filter(Boolean)
     : [];
 
+  const expiresAt = ttlHours > 0
+    ? new Date(Date.now() + ttlHours * 3_600_000).toISOString()
+    : "";
+
   const embedding = await embedOne(content);
 
   await qd.upsert(colName, {
@@ -57,31 +60,18 @@ export async function storeMemory(params: StoreMemoryParams): Promise<string> {
           content,
           agent_id:     cfg.agentId,
           project_id:   cfg.projectId,
+          memory_type:  memoryType,
           scope,
           importance,
+          access_count: 0,
           tags:         tagList,
           content_hash: hash,
           created_at:   now,
+          updated_at:   now,
+          expires_at:   expiresAt,
         },
       },
     ],
-  });
-
-  const expiresAt = ttlHours > 0
-    ? new Date(Date.now() + ttlHours * 3_600_000).toISOString()
-    : null;
-
-  await insertMeta({
-    id:          memId,
-    agentId:     cfg.agentId,
-    projectId:   cfg.projectId,
-    memoryType,
-    scope,
-    importance,
-    createdAt:   now,
-    expiresAt,
-    tags:        JSON.stringify(tagList),
-    contentHash: hash,
   });
 
   return `stored [${memoryType}]: ${memId} (importance=${importance})`;

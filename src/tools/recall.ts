@@ -1,6 +1,6 @@
 import { cfg } from "../config.js";
 import { qd } from "../qdrant.js";
-import { incrementAccess } from "../redis.js";
+import { incrementAccess } from "../storage.js";
 import { embedOne, llmFilter, type Candidate } from "../embedder.js";
 import { finalScore } from "../scoring.js";
 import { colForType, nowIso } from "../util.js";
@@ -65,6 +65,8 @@ export async function recallTool(a: RecallArgs): Promise<string> {
 
     for (const hit of hits) {
       const p         = (hit.payload ?? {}) as Record<string, unknown>;
+      const expiresAt = String(p["expires_at"] ?? "");
+      if (expiresAt && expiresAt < now) continue;
       const createdAt = String(p["created_at"] ?? "");
       const importance = Number(p["importance"] ?? 0.5);
       const score     = finalScore(hit.score, createdAt, importance, a.time_decay);

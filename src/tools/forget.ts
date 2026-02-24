@@ -1,5 +1,5 @@
 import { qd } from "../qdrant.js";
-import { getMemoryMeta, deleteById } from "../redis.js";
+import { getMemoryMeta, deleteById } from "../storage.js";
 import { colForType } from "../util.js";
 
 export interface ForgetArgs {

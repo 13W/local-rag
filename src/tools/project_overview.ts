@@ -2,11 +2,7 @@ import { readdirSync, statSync, readFileSync, existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { cfg } from "../config.js";
 import { qd } from "../qdrant.js";
-import {
-  getProjectOverview,
-  setProjectOverview,
-  topFilesByRevDeps,
-} from "../redis.js";
+import { topFilesByRevDeps } from "../storage.js";
 
 const IGNORE_DIRS = new Set([
   "node_modules", ".git", "dist", "build", ".next", "coverage",
@@ -160,10 +156,6 @@ async function getAllIndexedFilePaths(): Promise<string[]> {
 export async function projectOverviewTool(): Promise<string> {
   const root = resolve(cfg.projectRoot || process.cwd());
 
-  // Try cache first
-  const cached = await getProjectOverview(cfg.projectId).catch(() => null);
-  if (cached) return `${cached}\n\n(cached — runs indexer to refresh)`;
-
   const [tree, entryPoints, langStats, allFiles, collectionInfo] = await Promise.all([
     Promise.resolve(buildDirTree(root, 0, 3)),
     Promise.resolve(readEntryPoints(root)),
@@ -213,10 +205,5 @@ export async function projectOverviewTool(): Promise<string> {
     lines.push("");
   }
 
-  const overview = lines.join("\n");
-
-  // Cache the result
-  await setProjectOverview(cfg.projectId, overview).catch(() => undefined);
-
-  return overview;
+  return lines.join("\n");
 }

@@ -15,7 +15,6 @@ const { values } = parseArgs({
     "ollama-url":            { type: "string" },
     "embed-model":           { type: "string" },
     "embed-dim":             { type: "string" },
-    "redis-url":             { type: "string" },
     "agent-id":              { type: "string" },
     "project-id":            { type: "string" },
     "llm-model":             { type: "string" },
@@ -31,7 +30,6 @@ type ConfigFile = Partial<{
   "ollama-url":             string;
   "embed-model":            string;
   "embed-dim":              string | number;
-  "redis-url":              string;
   "agent-id":               string;
   "project-id":             string;
   "llm-model":              string;
@@ -69,7 +67,6 @@ export const cfg = Object.freeze({
   ollamaUrl:            str("ollama-url",   "http://localhost:11434"),
   embedModel:           str("embed-model",  "mxbai-embed-large"),
   embedDim:             parseInt(str("embed-dim", "1024"), 10),
-  redisUrl:             str("redis-url",    "redis://localhost:6379"),
   agentId:              str("agent-id",     "default"),
   projectId:            str("project-id",   "default"),
   llmModel:             str("llm-model",    "gemma3n:e2b"),

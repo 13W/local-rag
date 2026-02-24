@@ -1,6 +1,6 @@
 import { cfg } from "../config.js";
 import { qd } from "../qdrant.js";
-import { deleteById } from "../redis.js";
+import { deleteById } from "../storage.js";
 import { storeMemory, colForType } from "../util.js";
 import type { MemoryType, ScopeType } from "../types.js";
 

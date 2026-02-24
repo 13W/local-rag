@@ -1,6 +1,6 @@
 import { cfg } from "../config.js";
 import { qd, COLLECTIONS } from "../qdrant.js";
-import { topAccessed } from "../redis.js";
+import { topAccessed } from "../storage.js";
 
 export async function statsTool(): Promise<string> {
   const lines = [
