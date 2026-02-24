@@ -1,6 +1,6 @@
 import { parseArgs } from "node:util";
 import { readFileSync, existsSync } from "node:fs";
-import { resolve } from "node:path";
+import { resolve, dirname } from "node:path";
 
 // pnpm passes its own "--" separator into process.argv when using
 // `pnpm <script> -- <args>`.  Strip it so that named options that follow
@@ -40,6 +40,7 @@ type ConfigFile = Partial<{
 }>;
 
 let file: ConfigFile = {};
+let configDir: string | undefined;
 const configPath = values["config"] as string | undefined;
 if (configPath) {
   const abs = resolve(configPath);
@@ -47,7 +48,8 @@ if (configPath) {
     process.stderr.write(`[config] Config file not found: ${abs}\n`);
     process.exit(1);
   }
-  file = JSON.parse(readFileSync(abs, "utf8")) as ConfigFile;
+  file      = JSON.parse(readFileSync(abs, "utf8")) as ConfigFile;
+  configDir = dirname(abs);
 }
 
 function str(key: keyof ConfigFile & string, fallback: string): string {
@@ -71,7 +73,7 @@ export const cfg = Object.freeze({
   agentId:              str("agent-id",     "default"),
   projectId:            str("project-id",   "default"),
   llmModel:             str("llm-model",    "gemma3n:e2b"),
-  projectRoot:          str("project-root", ""),
+  projectRoot:          str("project-root", configDir ?? ""),
   generateDescriptions: bool("generate-descriptions", false),
 });
 process.stderr.write(`[config] projectId=${cfg.projectId} projectRoot=${cfg.projectRoot || "(cwd)"}\n`);
