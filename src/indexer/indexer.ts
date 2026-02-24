@@ -19,7 +19,7 @@ const COLLECTION  = "code_chunks";
 const BATCH_SIZE  = 32;
 const DESC_CONCURRENCY = 5;
 const IGNORE_DIRS = new Set([
-  "node_modules", ".git", "dist", "build", ".next", "coverage", "__tests__",
+  "node_modules", ".git", "dist", "build", ".next", "coverage",
   "vendor", "charts", "testdata",
 ]);
 
@@ -167,6 +167,9 @@ export class CodeIndexer {
   async indexFile(absPath: string, root: string): Promise<number> {
     const pathBase = cfg.projectRoot ? resolve(cfg.projectRoot) : root;
     const relPath  = relative(pathBase, absPath).replace(/\\/g, "/");
+    if (!this.resolver) {
+      this.resolver = new ImportResolver({ root: pathBase });
+    }
     const source  = readFileSync(absPath, "utf8");
     const newHash = hashSource(source);
 
@@ -185,12 +188,12 @@ export class CodeIndexer {
     await this.deleteFile(relPath);
 
     // ── Dep graph ────────────────────────────────────────────────────────────
-    const rawImports = chunks[0]?.imports ?? [];
-    if (rawImports.length > 0 && this.resolver) {
-      const resolved = this.resolver.resolveAll(rawImports, relPath);
-      if (resolved.length > 0) {
-        await setDeps(cfg.projectId, relPath, resolved).catch(() => undefined);
-      }
+    const rawImports      = chunks[0]?.imports ?? [];
+    const resolvedImports = rawImports.length > 0
+      ? this.resolver.resolveAll(rawImports, relPath)
+      : [];
+    if (resolvedImports.length > 0) {
+      await setDeps(cfg.projectId, relPath, resolvedImports).catch(() => undefined);
     }
 
     // ── Parent/child UUID assignment ─────────────────────────────────────────
@@ -318,7 +321,7 @@ export class CodeIndexer {
       if (isParent)      payload["is_parent"]     = true;
       if (parentId)      payload["parent_id"]     = parentId;
       if (childrenIds)   payload["children_ids"]  = childrenIds;
-      if (chunk.imports) payload["imports"]        = chunk.imports;
+      if (resolvedImports.length > 0) payload["imports"] = resolvedImports;
 
       points.push({ id, vector, payload });
     }
@@ -361,6 +364,57 @@ export class CodeIndexer {
       filter: { must: [{ key: "project_id", match: { value: cfg.projectId } }] },
     });
     process.stderr.write("[indexer] Index cleared\n");
+  }
+
+  async migrateImports(root: string): Promise<void> {
+    const pathBase = cfg.projectRoot ? resolve(cfg.projectRoot) : root;
+    const resolver = new ImportResolver({ root: pathBase });
+
+    let offset: string | number | undefined;
+    let total   = 0;
+    let updated = 0;
+
+    process.stderr.write("[indexer] Migrating imports to project-root-relative paths...\n");
+
+    do {
+      const result = await this.qd.scroll(COLLECTION, {
+        filter: {
+          must:     [{ key: "project_id", match: { value: cfg.projectId } }],
+          must_not: [{ is_empty: { key: "imports" } }],
+        },
+        limit:        100,
+        with_payload: true,
+        with_vector:  false,
+        offset,
+      });
+
+      for (const point of result.points) {
+        total++;
+        const pl         = point.payload as Record<string, unknown>;
+        const rawImports = pl["imports"] as string[] | undefined;
+        const filePath   = pl["file_path"] as string | undefined;
+        if (!rawImports?.length || !filePath) continue;
+
+        const resolved = resolver.resolveAll(rawImports, filePath);
+        if (resolved.length > 0) {
+          await this.qd.setPayload(COLLECTION, {
+            payload: { imports: resolved },
+            points:  [point.id as string],
+          });
+        } else {
+          await this.qd.deletePayload(COLLECTION, {
+            keys:   ["imports"],
+            points: [point.id as string],
+          });
+        }
+        updated++;
+      }
+
+      const next = result.next_page_offset;
+      offset = (typeof next === "string" || typeof next === "number") ? next : undefined;
+    } while (offset !== null && offset !== undefined);
+
+    process.stderr.write(`[indexer] Migration complete: ${updated}/${total} chunks updated\n`);
   }
 
   async stats(): Promise<void> {

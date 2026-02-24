@@ -10,6 +10,7 @@ Usage:
   node dist/indexer/cli.js clear                — remove all indexed chunks for this project
   node dist/indexer/cli.js stats                — show collection stats
   node dist/indexer/cli.js file   <abs> <root>  — index a single file
+  node dist/indexer/cli.js migrate-imports <root>   — fix imports paths in existing index
 
 Options:
   --generate-descriptions   Generate LLM descriptions for code chunks (slow, uses --llm-model)
@@ -61,6 +62,11 @@ if (cmd === "index") {
   const root    = resolve(arg3 ?? ".");
   const n = await indexer.indexFile(absPath, root);
   process.stdout.write(`${n} chunks indexed\n`);
+  process.exit(0);
+
+} else if (cmd === "migrate-imports") {
+  const root = resolve(arg2 ?? ".");
+  await indexer.migrateImports(root);
   process.exit(0);
 
 } else {
