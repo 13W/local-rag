@@ -7,14 +7,27 @@ Other agents are connected to the same memory — you share a common project-sco
 
 ---
 
-## Protocol: RECALL → THINK → ACT → REMEMBER
+## Protocol: RECALL + SEARCH_CODE → THINK → ACT → REMEMBER
 
-### RECALL — before every action
+### RECALL + SEARCH_CODE — before every action
 
-**Required** when receiving a task:
+**Both steps are required** when receiving any task:
+
+**Step 1 — Search memory:**
 ```
 recall(query="keywords from the task")
 ```
+Searches past decisions, bugs, patterns. Does NOT search code.
+
+**Step 2 — Search code (always, even on familiar codebases):**
+```
+search_code(query="what you are looking for")
+```
+Semantic RAG over the indexed codebase.
+
+> ❌ Do NOT substitute `mcp__serena__search_for_pattern` for `search_code`.
+> Serena's pattern search is regex-only, requires an active project, and does not understand meaning.
+> Use `search_code` first — then use Serena to read/edit specific symbols once you know their names.
 
 When to recall:
 - Before changing any code — look for patterns and past solutions
@@ -30,13 +43,13 @@ Memory types:
 
 ### CODEBASE ORIENTATION
 
-**Unfamiliar / new codebase — start with an overview:**
+**If project structure is unknown — start with an overview:**
 ```
 project_overview()
 ```
 Returns: directory tree (3 levels), entry points, language stats, indexed file count, top-10 most-imported modules.
 
-**Find relevant code via semantic search:**
+**Always find relevant code via semantic search (required step):**
 ```
 search_code(query="natural language description")
 search_code(query="router middleware auth", chunk_type="function")
