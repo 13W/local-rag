@@ -1,10 +1,33 @@
 {
   "name": "@13w/local-rag",
-  "version": "1.0.0",
+  "version": "1.1.0",
+  "description": "Distributed semantic memory + code RAG as an MCP plugin for Claude Code agents",
   "type": "module",
+  "files": [
+    "dist/"
+  ],
   "bin": {
     "local-rag": "dist/bin.js"
   },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/13W/local-rag.git"
+  },
+  "homepage": "https://github.com/13W/local-rag#readme",
+  "bugs": {
+    "url": "https://github.com/13W/local-rag/issues"
+  },
+  "keywords": [
+    "mcp",
+    "claude",
+    "claude-code",
+    "rag",
+    "memory",
+    "vector-search",
+    "qdrant",
+    "ollama",
+    "code-search"
+  ],
   "scripts": {
     "build": "tsc",
     "start": "node dist/bin.js serve",

@@ -1,5 +1,8 @@
 # local-rag — Distributed Memory + Code RAG for Claude Code
 
+[![npm](https://img.shields.io/npm/v/@13w/local-rag)](https://www.npmjs.com/package/@13w/local-rag)
+[![GitHub](https://img.shields.io/badge/github-13W%2Flocal--rag-blue)](https://github.com/13W/local-rag)
+
 Semantic memory and code intelligence as an MCP plugin for Claude Code agents.
 9 tools that give Claude persistent memory, semantic code search, and import graph traversal — all running locally.
 
@@ -74,20 +77,26 @@ docker run -d --name qdrant \
 
 <https://cloud.qdrant.io/> — set `qdrant-url` in `.memory.json` to your cluster endpoint.
 
-### 3. Node.js 18+ and pnpm
+### 3. Node.js 18+
 
-- Node.js: <https://nodejs.org/>
-- pnpm: `npm install -g pnpm`
+<https://nodejs.org/>
 
 ---
 
 ## Installation
 
+**From npm (recommended):**
+
 ```bash
-git clone <repo-url> /opt/local-rag
-cd /opt/local-rag
-pnpm install
-pnpm build
+npm install -g @13w/local-rag
+```
+
+**From source:**
+
+```bash
+git clone https://github.com/13W/local-rag.git
+cd local-rag
+npm install && npm run build
 ```
 
 ---
@@ -96,36 +105,37 @@ pnpm build
 
 ### Install local-rag
 
-**Option A — Per-project `.mcp.json` (recommended)**
+**Option A — `claude mcp add` with npx (no global install needed)**
 
-Add to your project's `.mcp.json`:
+Per-project (stored in `.mcp.json`, shared with the team):
+
+```bash
+claude mcp add memory -- npx -y @13w/local-rag serve --config .memory.json
+```
+
+Global — available in all projects on this machine:
+
+```bash
+claude mcp add memory -s user -- npx -y @13w/local-rag serve --config .memory.json
+```
+
+**Option B — `.mcp.json` directly**
 
 ```json
 {
   "mcpServers": {
     "memory": {
       "type": "stdio",
-      "command": "node",
-      "args": ["/opt/local-rag/dist/bin.js", "serve", "--config", ".memory.json"]
+      "command": "npx",
+      "args": ["-y", "@13w/local-rag", "serve", "--config", ".memory.json"]
     }
   }
 }
 ```
 
-**Option B — Global registration via `claude mcp add`**
-
-Available in all projects on this machine:
+**Option C — After global `npm install -g`**
 
 ```bash
-claude mcp add memory -s user -- node /opt/local-rag/dist/bin.js serve --config .memory.json
-```
-
-**Option C — Global npm install**
-
-```bash
-npm install -g /opt/local-rag
-
-# Then register:
 claude mcp add memory -- local-rag serve --config .memory.json
 ```
 
@@ -148,7 +158,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 claude mcp add serena -- uvx --from serena serena-mcp-server --context ide-assistant --project .
 ```
 
-Or add to `.mcp.json`:
+Or in `.mcp.json`:
 
 ```json
 {
@@ -171,8 +181,8 @@ Or add to `.mcp.json`:
   "mcpServers": {
     "memory": {
       "type": "stdio",
-      "command": "node",
-      "args": ["/opt/local-rag/dist/bin.js", "serve", "--config", ".memory.json"]
+      "command": "npx",
+      "args": ["-y", "@13w/local-rag", "serve", "--config", ".memory.json"]
     },
     "serena": {
       "type": "stdio",
@@ -232,10 +242,10 @@ Before `search_code` and `get_file_context` tools return results, index the proj
 
 ```bash
 # Index once
-node /opt/local-rag/dist/bin.js index . --config .memory.json
+npx @13w/local-rag index . --config .memory.json
 
 # Watch mode — re-indexes on file changes
-node /opt/local-rag/dist/bin.js watch . --config .memory.json
+npx @13w/local-rag watch . --config .memory.json
 
 # If installed globally
 local-rag index . --config .memory.json
