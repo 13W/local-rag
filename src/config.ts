@@ -53,8 +53,14 @@ type ConfigFile = Partial<{
 let file: ConfigFile = {};
 let configDir: string | undefined;
 const configPath = values["config"] as string | undefined;
-if (configPath) {
-  const abs = resolve(configPath);
+const { INIT_CWD, PWD } = process.env;
+const workingDirectory = INIT_CWD || PWD || process.cwd()
+
+const resolvedConfigPath = configPath ??
+  (existsSync(resolve(workingDirectory, ".memory.json")) ? ".memory.json" : undefined);
+
+if (resolvedConfigPath) {
+  const abs = resolve(workingDirectory, resolvedConfigPath);
   if (!existsSync(abs)) {
     process.stderr.write(`[config] Config file not found: ${abs}\n`);
     process.exit(1);

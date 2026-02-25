@@ -1,12 +1,15 @@
 {
-  "name": "local-memory",
+  "name": "@13w/local-rag",
   "version": "1.0.0",
   "type": "module",
+  "bin": {
+    "local-rag": "dist/bin.js"
+  },
   "scripts": {
     "build": "tsc",
-    "start": "node dist/server.js",
-    "index": "node dist/indexer/cli.js index",
-    "watch": "node dist/indexer/cli.js watch"
+    "start": "node dist/bin.js serve",
+    "index": "node dist/bin.js index",
+    "watch": "node dist/bin.js watch"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.26.0",

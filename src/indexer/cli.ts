@@ -8,13 +8,13 @@ import { migrateMeta } from "../storage.js";
 
 const USAGE = `
 Usage:
-  node dist/indexer/cli.js index  <root>        — index all files under <root>
-  node dist/indexer/cli.js watch  <root>        — index then watch for changes
-  node dist/indexer/cli.js clear                — remove all indexed chunks for this project
-  node dist/indexer/cli.js stats                — show collection stats
-  node dist/indexer/cli.js file   <abs> <root>  — index a single file
-  node dist/indexer/cli.js migrate-imports <root>   — fix imports paths in existing index
-  node dist/indexer/cli.js migrate-meta             — add missing payload fields to memory points (no re-embedding)
+  local-rag index  <root>        — index all files under <root>
+  local-rag watch  <root>        — index then watch for changes
+  local-rag clear                — remove all indexed chunks for this project
+  local-rag stats                — show collection stats
+  local-rag file   <abs> <root>  — index a single file
+  local-rag migrate-imports <root>   — fix imports paths in existing index
+  local-rag migrate-meta             — add missing payload fields to memory points (no re-embedding)
 
 Options:
   -c, --config <file>         Load options from a JSON config file
