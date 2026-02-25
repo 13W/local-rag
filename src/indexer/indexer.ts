@@ -366,57 +366,6 @@ export class CodeIndexer {
     process.stderr.write("[indexer] Index cleared\n");
   }
 
-  async migrateImports(root: string): Promise<void> {
-    const pathBase = cfg.projectRoot ? resolve(cfg.projectRoot) : root;
-    const resolver = new ImportResolver({ root: pathBase });
-
-    let offset: string | number | undefined;
-    let total   = 0;
-    let updated = 0;
-
-    process.stderr.write("[indexer] Migrating imports to project-root-relative paths...\n");
-
-    do {
-      const result = await this.qd.scroll(COLLECTION, {
-        filter: {
-          must:     [{ key: "project_id", match: { value: cfg.projectId } }],
-          must_not: [{ is_empty: { key: "imports" } }],
-        },
-        limit:        100,
-        with_payload: true,
-        with_vector:  false,
-        offset,
-      });
-
-      for (const point of result.points) {
-        total++;
-        const pl         = point.payload as Record<string, unknown>;
-        const rawImports = pl["imports"] as string[] | undefined;
-        const filePath   = pl["file_path"] as string | undefined;
-        if (!rawImports?.length || !filePath) continue;
-
-        const resolved = resolver.resolveAll(rawImports, filePath);
-        if (resolved.length > 0) {
-          await this.qd.setPayload(COLLECTION, {
-            payload: { imports: resolved },
-            points:  [point.id as string],
-          });
-        } else {
-          await this.qd.deletePayload(COLLECTION, {
-            keys:   ["imports"],
-            points: [point.id as string],
-          });
-        }
-        updated++;
-      }
-
-      const next = result.next_page_offset;
-      offset = (typeof next === "string" || typeof next === "number") ? next : undefined;
-    } while (offset !== null && offset !== undefined);
-
-    process.stderr.write(`[indexer] Migration complete: ${updated}/${total} chunks updated\n`);
-  }
-
   async stats(): Promise<void> {
     const info = await this.qd.getCollection(COLLECTION);
     process.stdout.write(

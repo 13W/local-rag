@@ -4,8 +4,6 @@ import { glob, lstat } from "node:fs/promises";
 import { CodeIndexer } from "./indexer.js";
 import { startWatcher } from "./watcher.js";
 import { cfg } from "../config.js";
-import { migrateMeta } from "../storage.js";
-
 const USAGE = `
 Usage:
   local-rag index  <root>        — index all files under <root>
@@ -13,8 +11,6 @@ Usage:
   local-rag clear                — remove all indexed chunks for this project
   local-rag stats                — show collection stats
   local-rag file   <abs> <root>  — index a single file
-  local-rag migrate-imports <root>   — fix imports paths in existing index
-  local-rag migrate-meta             — add missing payload fields to memory points (no re-embedding)
 
 Options:
   -c, --config <file>         Load options from a JSON config file
@@ -84,16 +80,6 @@ if (cmd === "index") {
   const root    = resolve(arg3 ?? ".");
   const n = await indexer.indexFile(absPath, root);
   process.stdout.write(`${n} chunks indexed\n`);
-  process.exit(0);
-
-} else if (cmd === "migrate-imports") {
-  const root = resolve(arg2 ?? ".");
-  await indexer.migrateImports(root);
-  process.exit(0);
-
-} else if (cmd === "migrate-meta") {
-  const { updated, total } = await migrateMeta(cfg.projectId);
-  process.stdout.write(`[migrate-meta] ${updated} of ${total} memory points updated\n`);
   process.exit(0);
 
 } else {

@@ -245,9 +245,9 @@ local-rag watch . --config .memory.json
 Other indexer commands:
 
 ```bash
-local-rag clear --config .memory.json          # remove all indexed chunks
-local-rag stats --config .memory.json          # show collection statistics
-local-rag file <abs-path> <root>               # index a single file
+local-rag clear --config .memory.json    # remove all indexed chunks
+local-rag stats --config .memory.json    # show collection statistics
+local-rag file <abs-path> <root>         # index a single file
 ```
 
 ---
