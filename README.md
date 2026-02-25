@@ -218,19 +218,23 @@ Create `.memory.json` in your project root (auto-discovered if present):
 | `project-root` | config file directory | Root path for code indexing |
 | `qdrant-url` | `http://localhost:6333` | Qdrant REST API URL |
 | `embed-provider` | `"ollama"` | Embedding provider: `ollama`, `openai`, `voyage` |
-| `embed-model` | `"mxbai-embed-large"` | Embedding model name |
+| `embed-model` | provider default¹ | Embedding model name |
 | `embed-dim` | `1024` | Embedding vector dimension |
 | `embed-api-key` | `""` | API key for OpenAI / Voyage embed providers — falls back to `OPENAI_API_KEY` / `VOYAGE_API_KEY` env var |
 | `embed-url` | `""` | Custom embedding API endpoint |
 | `ollama-url` | `http://localhost:11434` | Ollama API URL |
 | `agent-id` | `"default"` | Agent identifier (for multi-agent setups) |
 | `llm-provider` | `"ollama"` | LLM provider: `ollama`, `anthropic`, `openai` |
-| `llm-model` | `"gemma3n:e2b"` | LLM model for reranking / description generation |
+| `llm-model` | provider default² | LLM model for reranking / description generation |
 | `llm-api-key` | `""` | API key for Anthropic / OpenAI LLM providers — falls back to `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` env var |
 | `llm-url` | `""` | Custom LLM API endpoint |
 | `include-paths` | `[]` | Glob patterns to limit indexing scope (monorepos) |
 | `generate-descriptions` | `false` | Auto-generate LLM descriptions for code chunks (slow) |
 
+> ¹ `embed-model` defaults: `ollama` → `mxbai-embed-large`, `openai` → `text-embedding-3-small`, `voyage` → `voyage-code-3`
+>
+> ² `llm-model` defaults: `ollama` → `gemma3n:e2b`, `anthropic` → `claude-haiku-4-5-20251001`, `openai` → `gpt-4o-mini`
+>
 > **Resolution order (highest to lowest priority):** CLI flag → `.memory.json` value → environment variable → built-in default.
 >
 > API key environment variables are provider-specific:

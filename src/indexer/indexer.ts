@@ -146,15 +146,48 @@ export class CodeIndexer {
     return typeof hash === "string" ? hash : null;
   }
 
+  /**
+   * Returns true if any regular chunk (not a parent container, not a child)
+   * for this file is missing a description — meaning the file was indexed
+   * without --generate-descriptions and needs a re-index.
+   */
+  private async missingDescriptions(relPath: string): Promise<boolean> {
+    const result = await this.qd.scroll(COLLECTION, {
+      filter: {
+        must: [
+          { key: "file_path",  match: { value: relPath       } },
+          { key: "project_id", match: { value: cfg.projectId } },
+        ],
+      },
+      limit:        20,
+      with_payload: ["description", "is_parent", "parent_id"],
+      with_vector:  false,
+    });
+    const regular = result.points.filter((p) => {
+      const pl = p.payload ?? {};
+      return !pl["is_parent"] && !pl["parent_id"];
+    });
+    return regular.length > 0 &&
+      regular.some((p) => typeof (p.payload ?? {})["description"] !== "string");
+  }
+
   /** Generate descriptions for a batch of chunks (bounded concurrency). */
   private async batchGenerateDescriptions(chunks: CodeChunk[]): Promise<(string | null)[]> {
     const results: (string | null)[] = new Array(chunks.length).fill(null);
+    let errorLogged = false;
     for (let i = 0; i < chunks.length; i += DESC_CONCURRENCY) {
       const slice = chunks.slice(i, i + DESC_CONCURRENCY);
       const descs = await Promise.all(
         slice.map((c) =>
           generateDescription({ content: c.content, name: c.name, chunkType: c.chunkType, language: c.language })
-            .catch(() => null)
+            .catch((err: unknown) => {
+              if (!errorLogged) {
+                errorLogged = true;
+                const msg = err instanceof Error ? err.message : String(err);
+                process.stderr.write(`[indexer] description generation failed: ${msg}\n`);
+              }
+              return null;
+            })
         )
       );
       for (let j = 0; j < descs.length; j++) {
@@ -174,7 +207,11 @@ export class CodeIndexer {
     const newHash = hashSource(source);
 
     const storedHash = await this.getFileHash(relPath);
-    if (storedHash === newHash) return 0;
+    if (storedHash === newHash) {
+      if (!this.genDescs) return 0;
+      if (!(await this.missingDescriptions(relPath))) return 0;
+      process.stderr.write(`[indexer] re-indexing for descriptions: ${relPath}\n`);
+    }
 
     const chunks = await parseFile(relPath, source);
     if (chunks.length === 0) {

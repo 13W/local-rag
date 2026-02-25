@@ -101,7 +101,10 @@ async function callLlmOllama(prompt: string, _maxTokens: number): Promise<string
     body: JSON.stringify({ model: cfg.llmModel, prompt, stream: false }),
     signal: AbortSignal.timeout(90_000),
   });
-  if (!resp.ok) return Promise.reject(new Error(`LLM failed: ${resp.status} ${resp.statusText}`));
+  if (!resp.ok) {
+    const body = await resp.text().catch(() => "");
+    return Promise.reject(new Error(`LLM failed: ${resp.status} ${resp.statusText} (model=${cfg.llmModel}) — ${body}`));
+  }
   const data = (await resp.json()) as { response: string };
   return data.response;
 }
@@ -113,7 +116,10 @@ async function callLlmOpenAI(prompt: string, maxTokens: number): Promise<string>
     body: JSON.stringify({ model: cfg.llmModel, messages: [{ role: "user", content: prompt }], max_tokens: maxTokens }),
     signal: AbortSignal.timeout(90_000),
   });
-  if (!resp.ok) return Promise.reject(new Error(`LLM failed: ${resp.status} ${resp.statusText}`));
+  if (!resp.ok) {
+    const body = await resp.text().catch(() => "");
+    return Promise.reject(new Error(`LLM failed: ${resp.status} ${resp.statusText} (model=${cfg.llmModel}) — ${body}`));
+  }
   const data = (await resp.json()) as { choices: { message: { content: string } }[] };
   return data.choices[0]!.message.content;
 }
@@ -129,7 +135,10 @@ async function callLlmAnthropic(prompt: string, maxTokens: number): Promise<stri
     body: JSON.stringify({ model: cfg.llmModel, max_tokens: maxTokens, messages: [{ role: "user", content: prompt }] }),
     signal: AbortSignal.timeout(90_000),
   });
-  if (!resp.ok) return Promise.reject(new Error(`LLM failed: ${resp.status} ${resp.statusText}`));
+  if (!resp.ok) {
+    const body = await resp.text().catch(() => "");
+    return Promise.reject(new Error(`LLM failed: ${resp.status} ${resp.statusText} (model=${cfg.llmModel}) — ${body}`));
+  }
   const data = (await resp.json()) as { content: { type: string; text: string }[] };
   return data.content[0]!.text;
 }
@@ -157,8 +166,7 @@ export function generateDescription(chunk: {
     `Describe briefly in 1-2 sentences what this ${chunk.language} ${chunk.chunkType} ` +
     `"${chunk.name}" does:\n\n${preview}`;
   return callLlm(prompt, 200)
-    .then((text) => text.trim().slice(0, 500))
-    .catch(() => "");
+    .then((text) => text.trim().slice(0, 500));
 }
 
 export type Candidate = [number, string, string | number, string, string, string];

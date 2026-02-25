@@ -91,17 +91,28 @@ const llmApiKeyEnv   = llmProvider   === "anthropic" ? process.env.ANTHROPIC_API
                      : llmProvider   === "openai"    ? process.env.OPENAI_API_KEY
                      : undefined;
 
+const EMBED_MODEL_DEFAULT: Record<string, string> = {
+  ollama:  "mxbai-embed-large",
+  openai:  "text-embedding-3-small",
+  voyage:  "voyage-code-3",
+};
+const LLM_MODEL_DEFAULT: Record<string, string> = {
+  ollama:    "gemma3n:e2b",
+  anthropic: "claude-haiku-4-5-20251001",
+  openai:    "gpt-4o-mini",
+};
+
 export const cfg = Object.freeze({
   qdrantUrl:            str("qdrant-url",   "http://localhost:6333"),
   ollamaUrl:            str("ollama-url",   "http://localhost:11434"),
-  embedModel:           str("embed-model",  "mxbai-embed-large"),
+  embedModel:           str("embed-model",  EMBED_MODEL_DEFAULT[embedProvider] ?? "mxbai-embed-large"),
   embedDim:             parseInt(str("embed-dim", "1024"), 10),
   embedProvider,
   embedApiKey:          str("embed-api-key",  embedApiKeyEnv ?? ""),
   embedUrl:             str("embed-url",       ""),
   agentId:              str("agent-id",     "default"),
   projectId:            str("project-id",   "default"),
-  llmModel:             str("llm-model",    "gemma3n:e2b"),
+  llmModel:             str("llm-model",    LLM_MODEL_DEFAULT[llmProvider] ?? "gemma3n:e2b"),
   llmProvider,
   llmApiKey:            str("llm-api-key",  llmApiKeyEnv ?? ""),
   llmUrl:               str("llm-url",       ""),
