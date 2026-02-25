@@ -7,11 +7,15 @@ export async function statsTool(): Promise<string> {
     `Memory Stats | Agent: ${cfg.agentId} | Project: ${cfg.projectId}\n`,
   ];
 
+  const projectFilter = {
+    must: [{ key: "project_id", match: { value: cfg.projectId } }],
+  };
+
   const collectionLines = await Promise.all(
     COLLECTIONS.map((col) =>
       qd
-        .getCollection(col)
-        .then((info: { points_count?: number | null }) => `  ${col.padEnd(25)}: ${info.points_count ?? 0} points`)
+        .count(col, { filter: projectFilter })
+        .then((result) => `  ${col.padEnd(25)}: ${result.count} points`)
         .catch(() => `  ${col.padEnd(25)}: N/A`)
     )
   );
