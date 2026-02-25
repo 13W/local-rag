@@ -220,18 +220,27 @@ Create `.memory.json` in your project root (auto-discovered if present):
 | `embed-provider` | `"ollama"` | Embedding provider: `ollama`, `openai`, `voyage` |
 | `embed-model` | `"mxbai-embed-large"` | Embedding model name |
 | `embed-dim` | `1024` | Embedding vector dimension |
-| `embed-api-key` | `""` | API key for OpenAI / Voyage providers |
+| `embed-api-key` | `""` | API key for OpenAI / Voyage embed providers — falls back to `OPENAI_API_KEY` / `VOYAGE_API_KEY` env var |
 | `embed-url` | `""` | Custom embedding API endpoint |
 | `ollama-url` | `http://localhost:11434` | Ollama API URL |
 | `agent-id` | `"default"` | Agent identifier (for multi-agent setups) |
 | `llm-provider` | `"ollama"` | LLM provider: `ollama`, `anthropic`, `openai` |
 | `llm-model` | `"gemma3n:e2b"` | LLM model for reranking / description generation |
-| `llm-api-key` | `""` | API key for Anthropic / OpenAI LLM providers |
+| `llm-api-key` | `""` | API key for Anthropic / OpenAI LLM providers — falls back to `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` env var |
 | `llm-url` | `""` | Custom LLM API endpoint |
 | `include-paths` | `[]` | Glob patterns to limit indexing scope (monorepos) |
 | `generate-descriptions` | `false` | Auto-generate LLM descriptions for code chunks (slow) |
 
-> All keys can also be passed as CLI flags (e.g. `--project-id foo`).
+> **Resolution order (highest to lowest priority):** CLI flag → `.memory.json` value → environment variable → built-in default.
+>
+> API key environment variables are provider-specific:
+> | Provider | `embed-api-key` env var | `llm-api-key` env var |
+> |----------|------------------------|-----------------------|
+> | `openai` | `OPENAI_API_KEY` | `OPENAI_API_KEY` |
+> | `voyage` | `VOYAGE_API_KEY` | — |
+> | `anthropic` | — | `ANTHROPIC_API_KEY` |
+>
+> All other keys can also be passed as CLI flags (e.g. `--project-id foo`).
 > CLI flags override config file values. `include-paths` is config-file only.
 
 ---
