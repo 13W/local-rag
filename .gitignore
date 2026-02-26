@@ -1,4 +1,5 @@
-.claude
+.claude/*
+!.claude/hooks/
 .serena
 dist/
 node_modules/
