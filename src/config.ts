@@ -26,6 +26,8 @@ const { values } = parseArgs({
     "llm-provider":          { type: "string" },
     "llm-api-key":           { type: "string" },
     "llm-url":               { type: "string" },
+    "dashboard":             { type: "boolean" },
+    "dashboard-port":        { type: "string" },
   },
   allowPositionals: true,
   strict: false,
@@ -48,6 +50,8 @@ type ConfigFile = Partial<{
   "llm-provider":           string;
   "llm-api-key":            string;
   "llm-url":                string;
+  "dashboard-port"?:        string | number;
+  "dashboard"?:             boolean;
 }>;
 
 let file: ConfigFile = {};
@@ -119,6 +123,8 @@ export const cfg = Object.freeze({
   projectRoot:          str("project-root", configDir ?? ""),
   generateDescriptions: bool("generate-descriptions", false),
   includePaths:         (file["include-paths"] ?? []) as string[],
+  dashboardPort:        parseInt(str("dashboard-port", "0"), 10),
+  dashboard:            bool("dashboard", true),
 });
 process.stderr.write(
   `[config] projectId=${cfg.projectId} projectRoot=${cfg.projectRoot || "(cwd)"} includePaths=${cfg.includePaths.length}\n`
