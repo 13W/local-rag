@@ -2,9 +2,11 @@
   "name": "@13w/local-rag",
   "version": "1.3.1",
   "description": "Distributed semantic memory + code RAG as an MCP plugin for Claude Code agents",
+  "logo": "logo.svg",
   "type": "module",
   "files": [
-    "dist/"
+    "dist/",
+    "logo.svg"
   ],
   "bin": {
     "local-rag": "dist/bin.js"

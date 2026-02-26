@@ -1,3 +1,7 @@
+<div align="center">
+  <img src="logo.svg" width="80" height="80" alt="local-rag logo">
+</div>
+
 # local-rag — Distributed Memory + Code RAG for Claude Code
 
 [![npm](https://img.shields.io/npm/v/@13w/local-rag)](https://www.npmjs.com/package/@13w/local-rag)
