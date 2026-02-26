@@ -6,6 +6,8 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 
 import { ensureCollections } from "./qdrant.js";
+import { record, startDashboard } from "./dashboard.js";
+import { cfg } from "./config.js";
 import { rememberTool }         from "./tools/remember.js";
 import { recallTool }           from "./tools/recall.js";
 import { searchCodeTool }       from "./tools/search_code.js";
@@ -286,74 +288,90 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }))
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name } = request.params;
   const a = (request.params.arguments ?? {}) as Record<string, unknown>;
+  const bytesIn = JSON.stringify(a).length;
+  const t0 = Date.now();
 
-  let text: string;
+  const dispatch = async (): Promise<string> => {
+    let text: string;
 
-  if (name === "remember") {
-    text = await rememberTool({
-      content:     str(a["content"]),
-      memory_type: str(a["memory_type"], "semantic"),
-      scope:       str(a["scope"],       "project"),
-      tags:        str(a["tags"],        ""),
-      importance:  num(a["importance"],  0.5),
-      ttl_hours:   int(a["ttl_hours"],   0),
-    });
-  } else if (name === "recall") {
-    text = await recallTool({
-      query:         str(a["query"]),
-      memory_type:   str(a["memory_type"],   ""),
-      scope:         str(a["scope"],         ""),
-      tags:          str(a["tags"],          ""),
-      limit:         int(a["limit"],         5),
-      min_relevance: num(a["min_relevance"], 0.3),
-      time_decay:    bool(a["time_decay"],   true),
-      llm_filter:    bool(a["llm_filter"],   true),
-    });
-  } else if (name === "search_code") {
-    text = await searchCodeTool({
-      query:       str(a["query"]),
-      file_path:   str(a["file_path"],   ""),
-      chunk_type:  str(a["chunk_type"],  ""),
-      limit:       int(a["limit"],       10),
-      search_mode: str(a["search_mode"], "hybrid"),
-    });
-  } else if (name === "forget") {
-    text = await forgetTool({ memory_id: str(a["memory_id"]) });
-  } else if (name === "consolidate") {
-    text = await consolidateTool({
-      source:               str(a["source"],               "episodic"),
-      target:               str(a["target"],               "semantic"),
-      similarity_threshold: num(a["similarity_threshold"], 0.85),
-      dry_run:              bool(a["dry_run"],              true),
-    });
-  } else if (name === "stats") {
-    text = await statsTool();
-  } else if (name === "get_file_context") {
-    text = await getFileContextTool({
-      file_path:     str(a["file_path"]),
-      symbol_name:   str(a["symbol_name"],   ""),
-      start_line:    int(a["start_line"],    0),
-      end_line:      int(a["end_line"],      0),
-      context_lines: int(a["context_lines"], 10),
-    });
-  } else if (name === "get_dependencies") {
-    text = await getDependenciesTool({
-      file_path: str(a["file_path"]),
-      direction: str(a["direction"], "both"),
-      depth:     int(a["depth"],     1),
-    });
-  } else if (name === "project_overview") {
-    text = await projectOverviewTool();
-  } else {
-    text = `unknown tool: ${name}`;
-  }
+    if (name === "remember") {
+      text = await rememberTool({
+        content:     str(a["content"]),
+        memory_type: str(a["memory_type"], "semantic"),
+        scope:       str(a["scope"],       "project"),
+        tags:        str(a["tags"],        ""),
+        importance:  num(a["importance"],  0.5),
+        ttl_hours:   int(a["ttl_hours"],   0),
+      });
+    } else if (name === "recall") {
+      text = await recallTool({
+        query:         str(a["query"]),
+        memory_type:   str(a["memory_type"],   ""),
+        scope:         str(a["scope"],         ""),
+        tags:          str(a["tags"],          ""),
+        limit:         int(a["limit"],         5),
+        min_relevance: num(a["min_relevance"], 0.3),
+        time_decay:    bool(a["time_decay"],   true),
+        llm_filter:    bool(a["llm_filter"],   true),
+      });
+    } else if (name === "search_code") {
+      text = await searchCodeTool({
+        query:       str(a["query"]),
+        file_path:   str(a["file_path"],   ""),
+        chunk_type:  str(a["chunk_type"],  ""),
+        limit:       int(a["limit"],       10),
+        search_mode: str(a["search_mode"], "hybrid"),
+      });
+    } else if (name === "forget") {
+      text = await forgetTool({ memory_id: str(a["memory_id"]) });
+    } else if (name === "consolidate") {
+      text = await consolidateTool({
+        source:               str(a["source"],               "episodic"),
+        target:               str(a["target"],               "semantic"),
+        similarity_threshold: num(a["similarity_threshold"], 0.85),
+        dry_run:              bool(a["dry_run"],              true),
+      });
+    } else if (name === "stats") {
+      text = await statsTool();
+    } else if (name === "get_file_context") {
+      text = await getFileContextTool({
+        file_path:     str(a["file_path"]),
+        symbol_name:   str(a["symbol_name"],   ""),
+        start_line:    int(a["start_line"],    0),
+        end_line:      int(a["end_line"],      0),
+        context_lines: int(a["context_lines"], 10),
+      });
+    } else if (name === "get_dependencies") {
+      text = await getDependenciesTool({
+        file_path: str(a["file_path"]),
+        direction: str(a["direction"], "both"),
+        depth:     int(a["depth"],     1),
+      });
+    } else if (name === "project_overview") {
+      text = await projectOverviewTool();
+    } else {
+      text = `unknown tool: ${name}`;
+    }
 
-  return { content: [{ type: "text" as const, text }] };
+    return text;
+  };
+
+  let ok = false;
+  return dispatch()
+    .then((text) => {
+      ok = true;
+      record(name, bytesIn, text.length, Date.now() - t0, true);
+      return { content: [{ type: "text" as const, text }] };
+    })
+    .finally(() => {
+      if (!ok) record(name, bytesIn, 0, Date.now() - t0, false);
+    });
 });
 
 // ── Startup ──────────────────────────────────────────────────────────────────
 
 await ensureCollections();
+if (cfg.dashboard) startDashboard(cfg.dashboardPort);
 process.stderr.write("[memory] MCP server ready\n");
 
 const transport = new StdioServerTransport();
