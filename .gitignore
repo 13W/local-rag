@@ -1,5 +1,6 @@
 .claude/*
 !.claude/hooks/
+!.claude/settings.json
 .serena
 dist/
 node_modules/
