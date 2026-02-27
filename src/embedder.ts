@@ -1,6 +1,6 @@
 import { cfg } from "./config.js";
 
-const MAX_CHARS = 800;
+const MAX_CHARS = 3000;
 
 // ── Embedding ──────────────────────────────────────────────────────────────────
 
@@ -166,7 +166,7 @@ export function generateDescription(chunk: {
     `Describe briefly in 1-2 sentences what this ${chunk.language} ${chunk.chunkType} ` +
     `"${chunk.name}" does:\n\n${preview}`;
   return callLlm(prompt, 200)
-    .then((text) => text.trim().slice(0, 500));
+    .then((text) => text.trim().slice(0, 3000));
 }
 
 export type Candidate = [number, string, string | number, string, string, string];

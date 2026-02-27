@@ -1,7 +1,7 @@
 import { readdirSync, statSync, readFileSync, existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { cfg } from "../config.js";
-import { qd } from "../qdrant.js";
+import { qd, colName } from "../qdrant.js";
 import { topFilesByRevDeps } from "../storage.js";
 
 const IGNORE_DIRS = new Set([
@@ -131,7 +131,7 @@ async function getAllIndexedFilePaths(): Promise<string[]> {
 
   while (true) {
     const result = await qd
-      .scroll("code_chunks", {
+      .scroll(colName("code_chunks"), {
         filter: { must: [{ key: "project_id", match: { value: cfg.projectId } }] },
         limit:        500,
         with_payload: ["file_path"],
@@ -161,7 +161,7 @@ export async function projectOverviewTool(): Promise<string> {
     Promise.resolve(readEntryPoints(root)),
     getLanguageStats(root),
     getAllIndexedFilePaths(),
-    qd.getCollection("code_chunks").catch(() => null),
+    qd.getCollection(colName("code_chunks")).catch(() => null),
   ]);
 
   // Top files by reverse-dep count

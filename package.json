@@ -34,7 +34,11 @@
     "build": "tsc",
     "start": "node dist/bin.js serve",
     "index": "node dist/bin.js index",
-    "watch": "node dist/bin.js watch"
+    "watch": "node dist/bin.js watch",
+    "bench:build": "tsc -p tsconfig.bench.json",
+    "bench":       "node dist/scripts/benchmark.js",
+    "bench:fast":  "node dist/scripts/benchmark.js --no-descriptions",
+    "bench:rerun": "node dist/scripts/benchmark.js --skip-index"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.26.0",

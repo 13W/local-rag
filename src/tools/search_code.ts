@@ -1,4 +1,4 @@
-import { qd, CODE_VECTORS } from "../qdrant.js";
+import { qd, CODE_VECTORS, colName } from "../qdrant.js";
 import { embedOne } from "../embedder.js";
 import { cfg } from "../config.js";
 import type { Schemas } from "@qdrant/js-client-rest";
@@ -16,10 +16,11 @@ type ScoredPoint = Schemas["ScoredPoint"];
 export async function searchCodeTool(a: SearchCodeArgs): Promise<string> {
   const embedding = await embedOne(a.query);
 
-  const must: Array<{ key: string; match: { value: string } }> = [
+  const must: Array<{ key: string; match: { value: string } | { text: string } }> = [
     { key: "project_id", match: { value: cfg.projectId } },
   ];
-  if (a.file_path)  must.push({ key: "file_path",  match: { value: a.file_path  } });
+  // match: { text } without a full-text index performs exact substring matching in Qdrant
+  if (a.file_path)  must.push({ key: "file_path",  match: { text:  a.file_path  } });
   if (a.chunk_type) must.push({ key: "chunk_type", match: { value: a.chunk_type } });
 
   const filter = { must };
@@ -30,11 +31,11 @@ export async function searchCodeTool(a: SearchCodeArgs): Promise<string> {
   if (mode === "hybrid") {
     // Use Qdrant Query API with prefetch + Reciprocal Rank Fusion
     const result = await qd
-      .query("code_chunks", {
+      .query(colName("code_chunks"), {
         prefetch: [
-          { query: embedding as unknown as number[], using: CODE_VECTORS.code,        limit: a.limit * 2 },
-          { query: embedding as unknown as number[], using: CODE_VECTORS.description, limit: a.limit * 2 },
-        ],
+          { query: embedding as unknown as number[], using: CODE_VECTORS.code,        limit: a.limit * 2, score_threshold: 0.25 },
+          { query: embedding as unknown as number[], using: CODE_VECTORS.description, limit: a.limit * 2, score_threshold: 0.25 },
+        ] as unknown as Parameters<typeof qd.query>[1]["prefetch"],
         query:        { fusion: "rrf" },
         filter,
         limit:        a.limit,
@@ -48,7 +49,7 @@ export async function searchCodeTool(a: SearchCodeArgs): Promise<string> {
     if (result === null) {
       // Fall back to code-only search on error (description_vector may not exist yet)
       hits = await qd
-        .search("code_chunks", {
+        .search(colName("code_chunks"), {
           vector:          { name: CODE_VECTORS.code, vector: embedding },
           filter,
           limit:           a.limit,
@@ -64,7 +65,7 @@ export async function searchCodeTool(a: SearchCodeArgs): Promise<string> {
     const vectorName = mode === "semantic" ? CODE_VECTORS.description : CODE_VECTORS.code;
 
     hits = await qd
-      .search("code_chunks", {
+      .search(colName("code_chunks"), {
         vector:          { name: vectorName, vector: embedding },
         filter,
         limit:           a.limit,

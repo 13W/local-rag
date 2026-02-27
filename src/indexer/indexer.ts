@@ -13,9 +13,9 @@ import {
   invalidateProjectOverview,
 } from "../storage.js";
 import type { CodeChunk } from "../types.js";
-import { CODE_VECTORS } from "../qdrant.js";
+import { CODE_VECTORS, colName } from "../qdrant.js";
 
-const COLLECTION  = "code_chunks";
+const COLLECTION  = colName("code_chunks");
 const BATCH_SIZE  = 32;
 const DESC_CONCURRENCY = 5;
 const IGNORE_DIRS = new Set([
@@ -45,7 +45,7 @@ export class CodeIndexer {
       if (hasNamedVectors) return;
 
       process.stderr.write(
-        "[indexer] Migrating code_chunks to named vectors (existing index will be cleared)\n"
+        `[indexer] Migrating ${COLLECTION} to named vectors (existing index will be cleared)\n`
       );
       await this.qd.deleteCollection(COLLECTION);
     }

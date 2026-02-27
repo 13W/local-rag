@@ -3,7 +3,7 @@
  * All function signatures are identical so consumers only change their import path.
  */
 
-import { qd } from "./qdrant.js";
+import { qd, colName } from "./qdrant.js";
 
 const MEMORY_COLLECTIONS = [
   "memory_episodic",
@@ -35,7 +35,7 @@ export async function getMemoryMeta(
 ): Promise<{ memoryType: string; projectId: string } | null> {
   const searches = MEMORY_COLLECTIONS.map((col) =>
     qd
-      .retrieve(col, { ids: [id], with_payload: ["memory_type", "project_id"] })
+      .retrieve(colName(col), { ids: [id], with_payload: ["memory_type", "project_id"] })
       .then((pts) => ({ col, pts }))
       .catch(() => ({ col, pts: [] as unknown[] }))
   );
@@ -47,7 +47,7 @@ export async function getMemoryMeta(
     if (!pt) continue;
     const payload    = (pt.payload ?? {}) as Record<string, unknown>;
     const projectId  = typeof payload["project_id"]  === "string" ? payload["project_id"]  : null;
-    // Fall back to deriving memoryType from collection name for pre-migration points.
+    // Fall back to deriving memoryType from base collection name for pre-migration points.
     const memoryType = typeof payload["memory_type"] === "string"
       ? payload["memory_type"]
       : col.replace("memory_", "");
@@ -83,7 +83,7 @@ export async function incrementAccess(
 ): Promise<void> {
   const searches = MEMORY_COLLECTIONS.map((col) =>
     qd
-      .retrieve(col, { ids: [id], with_payload: ["access_count"] })
+      .retrieve(colName(col), { ids: [id], with_payload: ["access_count"] })
       .then((pts) => ({ col, pts }))
       .catch(() => ({ col, pts: [] as unknown[] }))
   );
@@ -95,7 +95,7 @@ export async function incrementAccess(
     if (!pt) continue;
     const payload     = (pt.payload ?? {}) as Record<string, unknown>;
     const accessCount = Number(payload["access_count"] ?? 0) + 1;
-    await qd.setPayload(col, {
+    await qd.setPayload(colName(col), {
       payload: { access_count: accessCount, updated_at: now },
       points:  [id],
     });
@@ -113,7 +113,7 @@ export async function topAccessed(projectId: string): Promise<TopAccessedEntry[]
 
     while (true) {
       const result = await qd
-        .scroll(col, {
+        .scroll(colName(col), {
           filter: { must: [{ key: "project_id", match: { value: projectId } }] },
           limit:        500,
           with_payload: ["access_count"],
@@ -159,7 +159,7 @@ export async function setDeps(
 /** Get the direct imports of a file (forward deps) from code_chunks payload. */
 export async function getDeps(projectId: string, filePath: string): Promise<string[]> {
   const result = await qd
-    .scroll("code_chunks", {
+    .scroll(colName("code_chunks"), {
       filter: {
         must: [
           { key: "project_id", match: { value: projectId } },
@@ -186,7 +186,7 @@ export async function getReverseDeps(projectId: string, filePath: string): Promi
 
   while (true) {
     const result = await qd
-      .scroll("code_chunks", {
+      .scroll(colName("code_chunks"), {
         filter: {
           must: [
             { key: "project_id", match: { value: projectId } },
@@ -288,7 +288,7 @@ export async function topFilesByRevDeps(
 
   while (true) {
     const result = await qd
-      .scroll("code_chunks", {
+      .scroll(colName("code_chunks"), {
         filter: { must: [{ key: "project_id", match: { value: projectId } }] },
         limit:        500,
         with_payload: ["imports"],

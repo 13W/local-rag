@@ -14,11 +14,26 @@ interface ToolStats {
 interface RequestEntry {
   ts:       number;
   tool:     string;
+  source:   "mcp" | "playground" | "watcher";
   bytesIn:  number;
   bytesOut: number;
   ms:       number;
   ok:       boolean;
+  chunks?:  number;
 }
+
+type DispatchFn = (tool: string, args: Record<string, unknown>) => Promise<string>;
+
+interface ToolSchemaDef {
+  name: string;
+  inputSchema: { properties: Record<string, unknown>; required: string[] };
+}
+
+// ── Module-level state ────────────────────────────────────────────────────────
+
+let _dispatch: DispatchFn | null = null;
+let _toolSchemasJson = "[]";
+let _active = false;
 
 // ── In-memory state ───────────────────────────────────────────────────────────
 
@@ -41,7 +56,7 @@ function statsSnapshot(): Record<string, ToolStats & { avgMs: number; tokensEst:
   return out;
 }
 
-export function record(tool: string, bytesIn: number, bytesOut: number, ms: number, ok: boolean): void {
+export function record(tool: string, source: "mcp" | "playground", bytesIn: number, bytesOut: number, ms: number, ok: boolean): void {
   const prev = toolStats.get(tool) ?? { calls: 0, bytesIn: 0, bytesOut: 0, totalMs: 0, errors: 0 };
   toolStats.set(tool, {
     calls:    prev.calls    + 1,
@@ -51,10 +66,19 @@ export function record(tool: string, bytesIn: number, bytesOut: number, ms: numb
     errors:   prev.errors   + (ok ? 0 : 1),
   });
 
-  const entry: RequestEntry = { ts: Date.now(), tool, bytesIn, bytesOut, ms, ok };
+  const entry: RequestEntry = { ts: Date.now(), tool, source, bytesIn, bytesOut, ms, ok };
   requestLog.push(entry);
   if (requestLog.length > LOG_MAX) requestLog.shift();
 
+  const data = `data: ${JSON.stringify({ type: "entry", entry, stats: statsSnapshot() })}\n\n`;
+  for (const res of new Set(sseClients)) res.write(data);
+}
+
+export function recordIndex(relPath: string, chunks: number, ms: number, ok: boolean): void {
+  if (!_active) return;
+  const entry: RequestEntry = { ts: Date.now(), tool: relPath, source: "watcher", bytesIn: 0, bytesOut: 0, ms, ok, chunks };
+  requestLog.push(entry);
+  if (requestLog.length > LOG_MAX) requestLog.shift();
   const data = `data: ${JSON.stringify({ type: "entry", entry, stats: statsSnapshot() })}\n\n`;
   for (const res of new Set(sseClients)) res.write(data);
 }
@@ -74,7 +98,8 @@ function broadcastShutdown(): void {
 
 // ── Dashboard HTML ────────────────────────────────────────────────────────────
 
-const DASHBOARD_HTML = `<!DOCTYPE html>
+function buildDashboardHtml(toolSchemasJson: string): string {
+  return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -93,6 +118,17 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     .ok  { color: #4ade80; }
     .err { color: #f87171; }
     .log-wrap { max-height: 420px; overflow-y: auto; border: 1px solid #2d2d4e; border-radius: 4px; }
+    .pg-input { width: 100%; background: #0f0f23; color: #e0e0e0; border: 1px solid #3d3d6e; padding: 0.35rem; font-family: monospace; font-size: 0.78rem; }
+    .pg-label { display: block; color: #a5b4fc; font-size: 0.8rem; margin-bottom: 0.2rem; }
+    .pg-field { margin-bottom: 0.5rem; }
+    #pg-run { background: #4f46e5; color: #fff; border: none; padding: 0.4rem 1rem; font-family: monospace; cursor: pointer; border-radius: 3px; font-size: 0.82rem; }
+    #pg-run:disabled { opacity: 0.5; cursor: not-allowed; }
+    #pg-run:hover:not(:disabled) { background: #4338ca; }
+    #pg-status { font-size: 0.8rem; margin-left: 0.75rem; }
+    #pg-out { background: #0f0f23; border: 1px solid #2d2d4e; border-radius: 4px; padding: 0.75rem; margin-top: 0.5rem; max-height: 400px; overflow: auto; font-size: 0.78rem; color: #e0e0e0; white-space: pre-wrap; word-break: break-all; min-height: 2.5rem; }
+    .src-mcp   { background: #1e3a5f; color: #7dd3fc; padding: 0.1rem 0.35rem; border-radius: 3px; font-size: 0.72rem; }
+    .src-pg    { background: #3d2a00; color: #fbbf24; padding: 0.1rem 0.35rem; border-radius: 3px; font-size: 0.72rem; }
+    .src-watch { background: #064e3b; color: #34d399; padding: 0.1rem 0.35rem; border-radius: 3px; font-size: 0.72rem; }
   </style>
 </head>
 <body>
@@ -109,17 +145,17 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <!-- hex outline -->
       <polygon points="20,2 35,11 35,29 20,38 5,29 5,11"
                fill="none" stroke="#a5b4fc" stroke-width="0.8" stroke-opacity="0.45"/>
-      <!-- spokes center→vertex -->
+      <!-- spokes center\u2192vertex -->
       <line x1="20" y1="20" x2="20" y2="2"   stroke="#7dd3fc" stroke-width="0.7" stroke-opacity="0.35"/>
       <line x1="20" y1="20" x2="35" y2="11"  stroke="#7dd3fc" stroke-width="0.7" stroke-opacity="0.35"/>
       <line x1="20" y1="20" x2="35" y2="29"  stroke="#7dd3fc" stroke-width="0.7" stroke-opacity="0.35"/>
       <line x1="20" y1="20" x2="20" y2="38"  stroke="#7dd3fc" stroke-width="0.7" stroke-opacity="0.35"/>
       <line x1="20" y1="20" x2="5"  y2="29"  stroke="#7dd3fc" stroke-width="0.7" stroke-opacity="0.35"/>
       <line x1="20" y1="20" x2="5"  y2="11"  stroke="#7dd3fc" stroke-width="0.7" stroke-opacity="0.35"/>
-      <!-- inner triangle ▲ -->
+      <!-- inner triangle \u25b2 -->
       <polygon points="20,2 35,29 5,29"
                fill="none" stroke="#a5b4fc" stroke-width="0.65" stroke-opacity="0.3"/>
-      <!-- inner triangle ▼ -->
+      <!-- inner triangle \u25bc -->
       <polygon points="20,38 35,11 5,11"
                fill="none" stroke="#a5b4fc" stroke-width="0.65" stroke-opacity="0.3"/>
       <!-- vertex nodes -->
@@ -145,10 +181,25 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   <h2>Request Log <span style="font-weight:normal;font-size:0.75rem;color:#6b7280">(newest first, max 500)</span></h2>
   <div class="log-wrap">
     <table id="log-tbl">
-      <thead><tr><th>Time</th><th>Tool</th><th>In</th><th>Out</th><th>ms</th><th>OK</th></tr></thead>
+      <thead><tr><th>Time</th><th>Tool</th><th>Source</th><th>In</th><th>Out</th><th>ms</th><th>OK</th></tr></thead>
       <tbody></tbody>
     </table>
   </div>
+  <h2>Playground</h2>
+  <div style="display:grid;grid-template-columns:200px 1fr;gap:1rem;align-items:start">
+    <div>
+      <label class="pg-label" for="pg-tool">Tool</label>
+      <select id="pg-tool" class="pg-input" style="cursor:pointer">
+        <option value="">\u2014 select \u2014</option>
+      </select>
+    </div>
+    <div id="pg-form"></div>
+  </div>
+  <div style="margin-top:0.75rem;display:flex;align-items:center">
+    <button id="pg-run">Run \u25b6</button>
+    <span id="pg-status"></span>
+  </div>
+  <pre id="pg-out"></pre>
   <script>
     const statsTbody = document.querySelector('#stats-tbl tbody');
     const logTbody   = document.querySelector('#log-tbl tbody');
@@ -186,10 +237,19 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
         if (cls) td.className = cls;
         tr.appendChild(td);
       };
+      const addBadgeCell = (source) => {
+        const td = document.createElement('td');
+        const span = document.createElement('span');
+        span.className = source === 'mcp' ? 'src-mcp' : source === 'playground' ? 'src-pg' : 'src-watch';
+        span.textContent = source === 'playground' ? 'pg' : source === 'watcher' ? 'watch' : source;
+        td.appendChild(span);
+        tr.appendChild(td);
+      };
       addCell(fmtTime(entry.ts));
       addCell(entry.tool);
-      addCell(fmtBytes(entry.bytesIn));
-      addCell(fmtBytes(entry.bytesOut));
+      addBadgeCell(entry.source);
+      addCell(entry.source === 'watcher' ? '\u2014' : fmtBytes(entry.bytesIn));
+      addCell(entry.source === 'watcher' ? (entry.chunks != null ? entry.chunks + '\u00a0ch' : '\u2014') : fmtBytes(entry.bytesOut));
       addCell(String(entry.ms));
       addCell(entry.ok ? '\u2713' : '\u2717', entry.ok ? 'ok' : 'err');
       logTbody.insertBefore(tr, logTbody.firstChild);
@@ -210,9 +270,120 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       document.body.innerHTML = '<div style="font:2rem monospace;padding:2rem;color:#f55">MCP server stopped.</div>';
       document.title = 'disconnected';
     };
+
+    // ── Playground ──────────────────────────────────────────────────────────────
+    const TOOL_SCHEMAS = ${toolSchemasJson};
+    const pgTool   = document.getElementById('pg-tool');
+    const pgForm   = document.getElementById('pg-form');
+    const pgRun    = document.getElementById('pg-run');
+    const pgStatus = document.getElementById('pg-status');
+    const pgOut    = document.getElementById('pg-out');
+
+    TOOL_SCHEMAS.forEach(function(schema) {
+      const opt = document.createElement('option');
+      opt.value = schema.name;
+      opt.textContent = schema.name;
+      pgTool.appendChild(opt);
+    });
+
+    function renderForm(toolName) {
+      pgForm.innerHTML = '';
+      if (!toolName) return;
+      const schema = TOOL_SCHEMAS.find(function(s) { return s.name === toolName; });
+      if (!schema) return;
+      const props = schema.inputSchema.properties || {};
+      const req   = schema.inputSchema.required   || [];
+      Object.keys(props).forEach(function(key) {
+        const prop = props[key];
+        const required = req.indexOf(key) !== -1;
+        const wrap = document.createElement('div');
+        wrap.className = 'pg-field';
+        const lbl = document.createElement('label');
+        lbl.className = 'pg-label';
+        lbl.setAttribute('for', 'pg-field-' + key);
+        lbl.textContent = key + (required ? ' *' : '');
+        wrap.appendChild(lbl);
+        var input;
+        if (key === 'content' && prop.type === 'string') {
+          input = document.createElement('textarea');
+          input.rows = 4;
+          input.className = 'pg-input';
+          input.style.resize = 'vertical';
+        } else if (prop.type === 'boolean') {
+          input = document.createElement('input');
+          input.type = 'checkbox';
+          if (prop.default === true) input.checked = true;
+        } else if (prop.type === 'number' || prop.type === 'integer') {
+          input = document.createElement('input');
+          input.type = 'number';
+          input.className = 'pg-input';
+          if (prop.default !== undefined) input.value = String(prop.default);
+        } else {
+          input = document.createElement('input');
+          input.type = 'text';
+          input.className = 'pg-input';
+          if (prop.default !== undefined) input.value = String(prop.default);
+        }
+        input.id = 'pg-field-' + key;
+        input.dataset.key  = key;
+        input.dataset.type = prop.type || 'string';
+        wrap.appendChild(input);
+        pgForm.appendChild(wrap);
+      });
+    }
+
+    pgTool.addEventListener('change', function() { renderForm(pgTool.value); });
+
+    pgRun.addEventListener('click', function() {
+      var toolName = pgTool.value;
+      if (!toolName) return;
+      var schema = TOOL_SCHEMAS.find(function(s) { return s.name === toolName; });
+      if (!schema) return;
+      var props = schema.inputSchema.properties || {};
+      var args = {};
+      Object.keys(props).forEach(function(key) {
+        var input = document.getElementById('pg-field-' + key);
+        if (!input) return;
+        var type = input.dataset.type;
+        if (type === 'boolean') {
+          args[key] = input.checked;
+        } else if (type === 'number' || type === 'integer') {
+          var v = input.value.trim();
+          if (v !== '') args[key] = Number(v);
+        } else {
+          var val = input.value;
+          if (val !== '') args[key] = val;
+        }
+      });
+      pgRun.disabled = true;
+      pgStatus.textContent = 'running\u2026';
+      pgStatus.className = '';
+      pgOut.textContent = '';
+      fetch('/api/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tool: toolName, args: args })
+      }).then(function(r) { return r.json(); }).then(function(data) {
+        pgRun.disabled = false;
+        if (data.ok) {
+          pgStatus.textContent = '\u2713 ' + data.ms + 'ms';
+          pgStatus.className = 'ok';
+        } else {
+          pgStatus.textContent = '\u2717 ' + data.ms + 'ms';
+          pgStatus.className = 'err';
+        }
+        pgOut.textContent = data.ok ? data.result : data.error;
+      }).catch(function(err) {
+        pgRun.disabled = false;
+        pgStatus.textContent = '\u2717 error';
+        pgStatus.className = 'err';
+        pgOut.textContent = String(err);
+      });
+    });
   </script>
 </body>
 </html>`;
+}
 
 // ── HTTP server ───────────────────────────────────────────────────────────────
 
@@ -234,13 +405,41 @@ const httpServer = createServer((req: IncomingMessage, res: ServerResponse) => {
     res.end(body);
     return;
   }
+  if (req.method === "POST" && req.url === "/api/run") {
+    const chunks: Buffer[] = [];
+    req.on("data", (c: Buffer) => chunks.push(c));
+    req.on("end", () => {
+      const t0 = Date.now();
+      Promise.resolve(Buffer.concat(chunks).toString())
+        .then(raw => JSON.parse(raw) as { tool: string; args: Record<string, unknown> })
+        .then(({ tool, args }) => {
+          const bytesIn = JSON.stringify(args ?? {}).length;
+          return _dispatch!(tool, args ?? {}).then(result => ({ tool, bytesIn, result }));
+        })
+        .then(({ tool, bytesIn, result }) => {
+          const ms = Date.now() - t0;
+          record(tool, "playground", bytesIn, result.length, ms, true);
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: true, result, ms }));
+        })
+        .catch((err: unknown) => {
+          const ms = Date.now() - t0;
+          res.writeHead(500, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: false, error: String(err), ms }));
+        });
+    });
+    return;
+  }
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-  res.end(DASHBOARD_HTML);
+  res.end(buildDashboardHtml(_toolSchemasJson));
 });
 
 // ── Exports ───────────────────────────────────────────────────────────────────
 
-export function startDashboard(port: number): void {
+export function startDashboard(port: number, toolSchemas: ToolSchemaDef[], dispatch: DispatchFn): void {
+  _active = true;
+  _dispatch = dispatch;
+  _toolSchemasJson = JSON.stringify(toolSchemas);
   httpServer.on("error", (err: NodeJS.ErrnoException) => {
     process.stderr.write(`[dashboard] HTTP error: ${err.message}\n`);
   });

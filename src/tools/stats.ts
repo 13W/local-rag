@@ -1,5 +1,5 @@
 import { cfg } from "../config.js";
-import { qd, COLLECTIONS } from "../qdrant.js";
+import { qd, COLLECTIONS, colName } from "../qdrant.js";
 import { topAccessed } from "../storage.js";
 
 export async function statsTool(): Promise<string> {
@@ -14,9 +14,9 @@ export async function statsTool(): Promise<string> {
   const collectionLines = await Promise.all(
     COLLECTIONS.map((col) =>
       qd
-        .count(col, { filter: projectFilter })
-        .then((result) => `  ${col.padEnd(25)}: ${result.count} points`)
-        .catch(() => `  ${col.padEnd(25)}: N/A`)
+        .count(colName(col), { filter: projectFilter })
+        .then((result) => `  ${colName(col).padEnd(25)}: ${result.count} points`)
+        .catch(() => `  ${colName(col).padEnd(25)}: N/A`)
     )
   );
   lines.push(...collectionLines);

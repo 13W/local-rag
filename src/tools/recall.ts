@@ -19,12 +19,13 @@ export interface RecallArgs {
 export async function recallTool(a: RecallArgs): Promise<string> {
   const embedding = await embedOne(a.query);
 
-  const collections: string[] =
+  const memTypes: string[] =
     a.memory_type === "episodic" ||
     a.memory_type === "semantic" ||
     a.memory_type === "procedural"
-      ? [colForType(a.memory_type)]
-      : ["memory_episodic", "memory_semantic", "memory_procedural"];
+      ? [a.memory_type]
+      : ["episodic", "semantic", "procedural"];
+  const collections = memTypes.map(colForType);
 
   const mustFilters: Array<{ key: string; match: { value: string } }> = [
     { key: "project_id", match: { value: cfg.projectId } },
@@ -58,10 +59,9 @@ export async function recallTool(a: RecallArgs): Promise<string> {
   const now = nowIso();
   const results: Candidate[] = [];
 
-  for (let ci = 0; ci < collections.length; ci++) {
-    const col  = collections[ci]!;
+  for (let ci = 0; ci < memTypes.length; ci++) {
     const hits = colResults[ci]!;
-    const mt   = col.replace("memory_", "");
+    const mt   = memTypes[ci]!;
 
     for (const hit of hits) {
       const p         = (hit.payload ?? {}) as Record<string, unknown>;

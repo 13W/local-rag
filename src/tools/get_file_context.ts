@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { qd } from "../qdrant.js";
+import { qd, colName } from "../qdrant.js";
 import { cfg } from "../config.js";
 
 export interface GetFileContextArgs {
@@ -25,7 +25,7 @@ export async function getFileContextTool(a: GetFileContextArgs): Promise<string>
 
   // Fetch all chunks for this file from Qdrant (for metadata)
   const scrollResult = await qd
-    .scroll("code_chunks", {
+    .scroll(colName("code_chunks"), {
       filter: {
         must: [
           { key: "file_path",  match: { value: a.file_path   } },

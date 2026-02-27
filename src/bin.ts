@@ -7,6 +7,9 @@ if (cmd === "serve" || cmd === "server") {
 } else if (cmd === "init") {
   const { init } = await import("./init.js");
   init();
+} else if (cmd === "migrate") {
+  const { runMigrate } = await import("./migrate.js");
+  await runMigrate();
 } else {
   await import("./indexer/cli.js");
 }

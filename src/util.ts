@@ -1,11 +1,11 @@
 import { createHash } from "node:crypto";
 import type { StoreMemoryParams } from "./types.js";
 import { cfg } from "./config.js";
-import { qd } from "./qdrant.js";
+import { qd, colName } from "./qdrant.js";
 import { embedOne } from "./embedder.js";
 
 export function colForType(memoryType: string): string {
-  return `memory_${memoryType}`;
+  return colName(`memory_${memoryType}`);
 }
 
 export function contentHash(s: string): string {

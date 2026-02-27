@@ -28,6 +28,8 @@ const { values } = parseArgs({
     "llm-url":               { type: "string" },
     "dashboard":             { type: "boolean" },
     "dashboard-port":        { type: "string" },
+    "collection-prefix":     { type: "string" },
+    "no-watch":              { type: "boolean" },
   },
   allowPositionals: true,
   strict: false,
@@ -52,6 +54,8 @@ type ConfigFile = Partial<{
   "llm-url":                string;
   "dashboard-port"?:        string | number;
   "dashboard"?:             boolean;
+  "collection-prefix"?:     string;
+  "no-watch"?:              boolean;
 }>;
 
 let file: ConfigFile = {};
@@ -96,7 +100,7 @@ const llmApiKeyEnv   = llmProvider   === "anthropic" ? process.env.ANTHROPIC_API
                      : undefined;
 
 const EMBED_MODEL_DEFAULT: Record<string, string> = {
-  ollama:  "mxbai-embed-large",
+  ollama:  "embeddinggemma:300m",
   openai:  "text-embedding-3-small",
   voyage:  "voyage-code-3",
 };
@@ -109,8 +113,8 @@ const LLM_MODEL_DEFAULT: Record<string, string> = {
 export const cfg = Object.freeze({
   qdrantUrl:            str("qdrant-url",   "http://localhost:6333"),
   ollamaUrl:            str("ollama-url",   "http://localhost:11434"),
-  embedModel:           str("embed-model",  EMBED_MODEL_DEFAULT[embedProvider] ?? "mxbai-embed-large"),
-  embedDim:             parseInt(str("embed-dim", "1024"), 10),
+  embedModel:           str("embed-model",  EMBED_MODEL_DEFAULT[embedProvider] ?? "embeddinggemma:300m"),
+  embedDim:             parseInt(str("embed-dim", "768"), 10),
   embedProvider,
   embedApiKey:          str("embed-api-key",  embedApiKeyEnv ?? ""),
   embedUrl:             str("embed-url",       ""),
@@ -125,6 +129,8 @@ export const cfg = Object.freeze({
   includePaths:         (file["include-paths"] ?? []) as string[],
   dashboardPort:        parseInt(str("dashboard-port", "0"), 10),
   dashboard:            bool("dashboard", true),
+  collectionPrefix:     str("collection-prefix", ""),
+  watch:                !bool("no-watch", false),
 });
 process.stderr.write(
   `[config] projectId=${cfg.projectId} projectRoot=${cfg.projectRoot || "(cwd)"} includePaths=${cfg.includePaths.length}\n`
