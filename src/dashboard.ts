@@ -1,5 +1,14 @@
 import { createServer, type ServerResponse, type IncomingMessage } from "node:http";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { cfg } from "./config.js";
+
+const _dir = dirname(fileURLToPath(import.meta.url));
+const PKG_VERSION: string = (
+  JSON.parse(readFileSync(resolve(_dir, "../package.json"), "utf8")) as { version: string }
+).version;
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -29,10 +38,23 @@ interface ToolSchemaDef {
   inputSchema: { properties: Record<string, unknown>; required: string[] };
 }
 
+interface ServerInfo {
+  projectId:            string;
+  agentId:              string;
+  version:              string;
+  watch:                boolean;
+  branch:               string;
+  collectionPrefix:     string;
+  embedProvider:        string;
+  embedModel:           string;
+  generateDescriptions: boolean;
+}
+
 // ── Module-level state ────────────────────────────────────────────────────────
 
 let _dispatch: DispatchFn | null = null;
 let _toolSchemasJson = "[]";
+let _serverInfoJson  = "{}";
 let _active = false;
 
 // ── In-memory state ───────────────────────────────────────────────────────────
@@ -96,9 +118,18 @@ function broadcastShutdown(): void {
   for (const res of new Set(sseClients)) res.write(data);
 }
 
+function getCurrentBranch(root: string): string {
+  const r = spawnSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+    cwd: root || process.cwd(),
+    encoding: "utf8",
+    timeout: 2000,
+  });
+  return r.status === 0 ? r.stdout.trim() : "";
+}
+
 // ── Dashboard HTML ────────────────────────────────────────────────────────────
 
-function buildDashboardHtml(toolSchemasJson: string): string {
+function buildDashboardHtml(toolSchemasJson: string, serverInfoJson: string): string {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -129,6 +160,13 @@ function buildDashboardHtml(toolSchemasJson: string): string {
     .src-mcp   { background: #1e3a5f; color: #7dd3fc; padding: 0.1rem 0.35rem; border-radius: 3px; font-size: 0.72rem; }
     .src-pg    { background: #3d2a00; color: #fbbf24; padding: 0.1rem 0.35rem; border-radius: 3px; font-size: 0.72rem; }
     .src-watch { background: #064e3b; color: #34d399; padding: 0.1rem 0.35rem; border-radius: 3px; font-size: 0.72rem; }
+    .info-bar { display:flex; flex-wrap:wrap; gap:0.3rem 0.6rem; margin:0.4rem 0 1rem; font-size:0.76rem; }
+    .info-tag { background:#2d2d4e; padding:0.15rem 0.45rem; border-radius:3px; white-space:nowrap; }
+    .info-tag .lbl { color:#6b7280; }
+    .info-tag .val { color:#e0e0e0; }
+    .info-tag .val.on  { color:#4ade80; }
+    .info-tag .val.off { color:#f87171; }
+    .info-tag .val.branch { color:#fbbf24; }
   </style>
 </head>
 <body>
@@ -173,6 +211,7 @@ function buildDashboardHtml(toolSchemasJson: string): string {
     <h1 style="margin:0">MCP Tool Dashboard</h1>
   </div>
   <div id="status">connecting\u2026</div>
+  <div id="info-bar" class="info-bar"></div>
   <h2>Tool Stats</h2>
   <table id="stats-tbl">
     <thead><tr><th>Tool</th><th>Calls</th><th>Bytes In</th><th>Bytes Out</th><th>Avg ms</th><th>Est Tokens</th><th>Errors</th></tr></thead>
@@ -201,6 +240,24 @@ function buildDashboardHtml(toolSchemasJson: string): string {
   </div>
   <pre id="pg-out"></pre>
   <script>
+    const SERVER_INFO = ${serverInfoJson};
+    (function renderInfo() {
+      const bar = document.getElementById('info-bar');
+      const add = (lbl, val, cls) => {
+        const tag = document.createElement('span');
+        tag.className = 'info-tag';
+        tag.innerHTML = '<span class="lbl">' + lbl + '</span> <span class="val' + (cls ? ' ' + cls : '') + '">' + val + '</span>';
+        bar.appendChild(tag);
+      };
+      add('project', SERVER_INFO.projectId);
+      add('agent',   SERVER_INFO.agentId);
+      add('v',       SERVER_INFO.version);
+      add('index',   SERVER_INFO.watch ? '\u2713 on' : '\u2717 off', SERVER_INFO.watch ? 'on' : 'off');
+      add('descriptions', SERVER_INFO.generateDescriptions ? '\u2713 on' : '\u2717 off', SERVER_INFO.generateDescriptions ? 'on' : 'off');
+      if (SERVER_INFO.branch) add('branch', SERVER_INFO.branch, 'branch');
+      if (SERVER_INFO.collectionPrefix) add('prefix', SERVER_INFO.collectionPrefix);
+      add('embed', SERVER_INFO.embedProvider + ':' + SERVER_INFO.embedModel);
+    })();
     const statsTbody = document.querySelector('#stats-tbl tbody');
     const logTbody   = document.querySelector('#log-tbl tbody');
     const statusEl   = document.getElementById('status');
@@ -262,12 +319,13 @@ function buildDashboardHtml(toolSchemasJson: string): string {
     const es = new EventSource('/events');
     es.onmessage = ({ data }) => {
       const msg = JSON.parse(data);
-      if (msg.type === 'init')     { statusEl.textContent = 'connected'; renderStats(msg.stats); msg.log.toReversed().forEach(appendRow); }
+      if (msg.type === 'init')     { statusEl.textContent = 'connected'; statusEl.style.color = ''; renderStats(msg.stats); msg.log.toReversed().forEach(appendRow); }
       if (msg.type === 'entry')    { renderStats(msg.stats); appendRow(msg.entry); trimLog(); }
       if (msg.type === 'shutdown') { window.close(); }
     };
     es.onerror = () => {
-      document.body.innerHTML = '<div style="font:2rem monospace;padding:2rem;color:#f55">MCP server stopped.</div>';
+      statusEl.textContent = 'disconnected';
+      statusEl.style.color = '#f87171';
       document.title = 'disconnected';
     };
 
@@ -431,7 +489,7 @@ const httpServer = createServer((req: IncomingMessage, res: ServerResponse) => {
     return;
   }
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-  res.end(buildDashboardHtml(_toolSchemasJson));
+  res.end(buildDashboardHtml(_toolSchemasJson, _serverInfoJson));
 });
 
 // ── Exports ───────────────────────────────────────────────────────────────────
@@ -439,6 +497,17 @@ const httpServer = createServer((req: IncomingMessage, res: ServerResponse) => {
 export function startDashboard(port: number, toolSchemas: ToolSchemaDef[], dispatch: DispatchFn): void {
   _active = true;
   _dispatch = dispatch;
+  _serverInfoJson = JSON.stringify({
+    projectId:            cfg.projectId,
+    agentId:              cfg.agentId,
+    version:              PKG_VERSION,
+    watch:                cfg.watch,
+    branch:               getCurrentBranch(cfg.projectRoot),
+    collectionPrefix:     cfg.collectionPrefix,
+    embedProvider:        cfg.embedProvider,
+    embedModel:           cfg.embedModel,
+    generateDescriptions: cfg.generateDescriptions,
+  } satisfies ServerInfo);
   _toolSchemasJson = JSON.stringify(toolSchemas);
   httpServer.on("error", (err: NodeJS.ErrnoException) => {
     process.stderr.write(`[dashboard] HTTP error: ${err.message}\n`);
