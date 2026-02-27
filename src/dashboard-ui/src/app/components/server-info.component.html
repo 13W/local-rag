@@ -1,0 +1,18 @@
+<div class="info-bar">
+  <span class="info-tag"><span class="lbl">project</span> <span class="val">{{ info().projectId }}</span></span>
+  <span class="info-tag"><span class="lbl">agent</span>   <span class="val">{{ info().agentId }}</span></span>
+  <span class="info-tag"><span class="lbl">v</span>       <span class="val">{{ info().version }}</span></span>
+  <span class="info-tag"><span class="lbl">index</span>
+    <span [class]="'val ' + (info().watch ? 'on' : 'off')">{{ info().watch ? '✓ on' : '✗ off' }}</span>
+  </span>
+  <span class="info-tag"><span class="lbl">descriptions</span>
+    <span [class]="'val ' + (info().generateDescriptions ? 'on' : 'off')">{{ info().generateDescriptions ? '✓ on' : '✗ off' }}</span>
+  </span>
+  @if (info().branch) {
+    <span class="info-tag"><span class="lbl">branch</span> <span class="val branch">{{ info().branch }}</span></span>
+  }
+  @if (info().collectionPrefix) {
+    <span class="info-tag"><span class="lbl">prefix</span> <span class="val">{{ info().collectionPrefix }}</span></span>
+  }
+  <span class="info-tag"><span class="lbl">embed</span> <span class="val">{{ info().embedProvider }}:{{ info().embedModel }}</span></span>
+</div>

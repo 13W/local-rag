@@ -1,0 +1,20 @@
+<div class="log-wrap">
+  <table id="log-tbl">
+    <thead>
+      <tr><th>Time</th><th>Tool</th><th>Source</th><th>In</th><th>Out</th><th>ms</th><th>OK</th></tr>
+    </thead>
+    <tbody>
+      @for (e of entries(); track e.ts + e.tool) {
+        <tr>
+          <td>{{ fmtTime(e.ts) }}</td>
+          <td>{{ e.tool }}</td>
+          <td><span [class]="srcClass(e)">{{ srcLabel(e) }}</span></td>
+          <td>{{ e.source === 'watcher' ? '—' : fmtBytes(e.bytesIn) }}</td>
+          <td>{{ outVal(e) }}</td>
+          <td>{{ e.ms }}</td>
+          <td [class]="e.ok ? 'ok' : 'err'">{{ e.ok ? '✓' : '✗' }}</td>
+        </tr>
+      }
+    </tbody>
+  </table>
+</div>

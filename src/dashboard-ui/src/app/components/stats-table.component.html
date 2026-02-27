@@ -1,0 +1,21 @@
+<table id="stats-tbl">
+  <thead>
+    <tr>
+      <th>Tool</th><th>Calls</th><th>Bytes In</th><th>Bytes Out</th>
+      <th>Avg ms</th><th>Est Tokens</th><th>Errors</th>
+    </tr>
+  </thead>
+  <tbody>
+    @for (row of rows(); track row[0]) {
+      <tr>
+        <td>{{ row[0] }}</td>
+        <td>{{ row[1].calls }}</td>
+        <td>{{ fmtBytes(row[1].bytesIn) }}</td>
+        <td>{{ fmtBytes(row[1].bytesOut) }}</td>
+        <td>{{ row[1].avgMs.toFixed(0) }}</td>
+        <td>{{ row[1].tokensEst }}</td>
+        <td [class]="row[1].errors > 0 ? 'err' : 'ok'">{{ row[1].errors }}</td>
+      </tr>
+    }
+  </tbody>
+</table>

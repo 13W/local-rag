@@ -29,5 +29,5 @@
     "outDir": "./dist"
   },
   "include": ["src/**/*.ts", "typings/**/*.d.ts"],
-  "exclude": ["node_modules/**/*", "dist/**/*", "types/**/*"]
+  "exclude": ["node_modules/**/*", "dist/**/*", "types/**/*", "src/dashboard-ui/**/*"]
 }

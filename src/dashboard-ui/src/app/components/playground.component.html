@@ -1,0 +1,53 @@
+<div>
+  <div style="display:grid;grid-template-columns:200px 1fr;gap:1rem;align-items:start">
+    <div>
+      <label class="pg-label" for="pg-tool">Tool</label>
+      <select id="pg-tool" class="pg-input" style="cursor:pointer"
+        [value]="selectedTool()"
+        (change)="handleToolChange($any($event.target).value)">
+        <option value="">— select —</option>
+        @for (s of schemas(); track s.name) {
+          <option [value]="s.name">{{ s.name }}</option>
+        }
+      </select>
+    </div>
+    <div id="pg-form">
+      @if (schema()) {
+        @for (key of propKeys(); track key) {
+          <div class="pg-field">
+            <label class="pg-label" [for]="'pg-field-' + key">
+              {{ key }}{{ isRequired(key) ? ' *' : '' }}
+            </label>
+            @if (getProp(key).type === 'boolean') {
+              <input type="checkbox" [id]="'pg-field-' + key"
+                [checked]="isChecked(key)"
+                (change)="setVal(key, $any($event.target).checked)" />
+            } @else if (key === 'content' && getProp(key).type === 'string') {
+              <textarea [id]="'pg-field-' + key" class="pg-input"
+                rows="4" style="resize:vertical"
+                [value]="inputVal(key)"
+                (input)="setVal(key, $any($event.target).value)"></textarea>
+            } @else if (getProp(key).type === 'number' || getProp(key).type === 'integer') {
+              <input type="number" [id]="'pg-field-' + key" class="pg-input"
+                [value]="inputVal(key)"
+                (input)="setVal(key, $any($event.target).value)" />
+            } @else {
+              <input type="text" [id]="'pg-field-' + key" class="pg-input"
+                [value]="inputVal(key)"
+                (input)="setVal(key, $any($event.target).value)" />
+            }
+          </div>
+        }
+      }
+    </div>
+  </div>
+  <div style="margin-top:0.75rem;display:flex;align-items:center">
+    <button id="pg-run" [disabled]="running() || !selectedTool()" (click)="handleRun()">
+      Run &#9654;
+    </button>
+    @if (runStatus()) {
+      <span id="pg-status" [class]="runStatus()!.ok ? 'ok' : 'err'">{{ runStatus()!.text }}</span>
+    }
+  </div>
+  <pre id="pg-out">{{ output() }}</pre>
+</div>
