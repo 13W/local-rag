@@ -7,7 +7,7 @@ import { recordIndex } from "../dashboard.js";
 export function startWatcher(root: string, indexer: CodeIndexer): void {
   const absRoot = resolve(root);
 
-  watch(absRoot, { recursive: true }, (event, filename) => {
+  const watcher = watch(absRoot, { recursive: true }, (event, filename) => {
     if (!filename) return;
     const absPath  = resolve(join(absRoot, filename));
     if (indexer.shouldSkip(absPath)) return;
@@ -41,6 +41,10 @@ export function startWatcher(root: string, indexer: CodeIndexer): void {
         });
     }
   });
+
+  // Allow the process to exit naturally when the MCP transport closes.
+  // Without unref(), fs.watch keeps the event loop alive indefinitely.
+  watcher.unref();
 
   process.stderr.write(`[watcher] Watching ${absRoot}\n`);
 }
