@@ -6,7 +6,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 
 import { ensureCollections } from "./qdrant.js";
-import { record, startDashboard } from "./dashboard.js";
+import { record, startDashboard, broadcastShutdown } from "./dashboard.js";
 import { CodeIndexer }  from "./indexer/indexer.js";
 import { startWatcher } from "./indexer/watcher.js";
 import { cfg } from "./config.js";
@@ -263,3 +263,8 @@ process.stderr.write("[memory] MCP server ready\n");
 
 const transport = new StdioServerTransport();
 await server.connect(transport);
+
+process.stdin.once("close", () => {
+  if (cfg.dashboard) broadcastShutdown();
+  process.exit(0);
+});

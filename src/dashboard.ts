@@ -113,7 +113,7 @@ function openBrowser(url: string): void {
   spawn(cmd, args, { detached: true, stdio: "ignore" }).unref();
 }
 
-function broadcastShutdown(): void {
+export function broadcastShutdown(): void {
   const data = `data: ${JSON.stringify({ type: "shutdown" })}\n\n`;
   for (const res of new Set(sseClients)) res.write(data);
 }
@@ -522,4 +522,5 @@ export function startDashboard(port: number, toolSchemas: ToolSchemaDef[], dispa
   process.on("SIGINT",  () => { broadcastShutdown(); process.exit(0); });
   process.on("SIGTERM", () => { broadcastShutdown(); process.exit(0); });
   httpServer.listen(port);
+  httpServer.unref();
 }
