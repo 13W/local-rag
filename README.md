@@ -27,7 +27,7 @@ Semantic memory and code intelligence as an MCP plugin for Claude Code agents.
 ## Stack
 
 - **Qdrant** — vector database (Rust, production-ready)
-- **Ollama** — local embeddings (`mxbai-embed-large`)
+- **Ollama** — local embeddings (`embeddinggemma:300m`)
 - **tree-sitter** — multi-language code parser (TypeScript, JavaScript, Go, Rust)
 - **MCP** — Model Context Protocol (stdio transport)
 
@@ -53,7 +53,7 @@ curl -fsSL https://ollama.com/install.sh | sh
 Pull the embedding model:
 
 ```bash
-ollama pull mxbai-embed-large
+ollama pull embeddinggemma:300m
 ```
 
 ### 2. Qdrant (vector database)
@@ -209,7 +209,7 @@ Create `.memory.json` in your project root (auto-discovered if present):
   "project-root": ".",
   "qdrant-url": "http://localhost:6333",
   "embed-provider": "ollama",
-  "embed-model": "mxbai-embed-large",
+  "embed-model": "embeddinggemma:300m",
   "ollama-url": "http://localhost:11434"
 }
 ```
@@ -234,8 +234,12 @@ Create `.memory.json` in your project root (auto-discovered if present):
 | `llm-url` | `""` | Custom LLM API endpoint |
 | `include-paths` | `[]` | Glob patterns to limit indexing scope (monorepos) |
 | `generate-descriptions` | `false` | Auto-generate LLM descriptions for code chunks (slow) |
+| `dashboard` | `true` | Enable the live dashboard HTTP server |
+| `dashboard-port` | `0` | Dashboard HTTP port; `0` lets the OS pick a random port |
+| `collection-prefix` | `""` | String prepended to all Qdrant collection names (useful on shared Qdrant instances) |
+| `no-watch` | `false` | Disable automatic file re-indexing when files change (applies during `serve`) |
 
-> ¹ `embed-model` defaults: `ollama` → `mxbai-embed-large`, `openai` → `text-embedding-3-small`, `voyage` → `voyage-code-3`
+> ¹ `embed-model` defaults: `ollama` → `embeddinggemma:300m`, `openai` → `text-embedding-3-small`, `voyage` → `voyage-code-3`
 >
 > ² `llm-model` defaults: `ollama` → `gemma3n:e2b`, `anthropic` → `claude-haiku-4-5-20251001`, `openai` → `gpt-4o-mini`
 >
@@ -275,6 +279,23 @@ Other indexer commands:
 local-rag clear --config .memory.json    # remove all indexed chunks
 local-rag stats --config .memory.json    # show collection statistics
 local-rag file <abs-path> <root>         # index a single file
+```
+
+---
+
+## Live Dashboard
+
+`local-rag serve` automatically opens a browser dashboard on a local HTTP port.
+It displays real-time tool call statistics (calls, bytes, latency, errors per tool),
+a scrolling request log, a server info bar (project, branch, version, watch status),
+and an interactive tool playground for testing calls manually.
+
+The port is OS-assigned by default (printed to stderr as `[dashboard] http://localhost:PORT`).
+To use a fixed port or disable the dashboard:
+
+```json
+{ "dashboard-port": 4242 }
+{ "dashboard": false }
 ```
 
 ---
