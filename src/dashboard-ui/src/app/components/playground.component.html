@@ -1,53 +1,147 @@
-<div>
-  <div style="display:grid;grid-template-columns:200px 1fr;gap:1rem;align-items:start">
-    <div>
-      <label class="pg-label" for="pg-tool">Tool</label>
-      <select id="pg-tool" class="pg-input" style="cursor:pointer"
-        [value]="selectedTool()"
-        (change)="handleToolChange($any($event.target).value)">
-        <option value="">— select —</option>
-        @for (s of schemas(); track s.name) {
-          <option [value]="s.name">{{ s.name }}</option>
-        }
-      </select>
-    </div>
-    <div id="pg-form">
-      @if (schema()) {
-        @for (key of propKeys(); track key) {
-          <div class="pg-field">
-            <label class="pg-label" [for]="'pg-field-' + key">
-              {{ key }}{{ isRequired(key) ? ' *' : '' }}
-            </label>
-            @if (getProp(key).type === 'boolean') {
-              <input type="checkbox" [id]="'pg-field-' + key"
-                [checked]="isChecked(key)"
-                (change)="setVal(key, $any($event.target).checked)" />
-            } @else if (key === 'content' && getProp(key).type === 'string') {
-              <textarea [id]="'pg-field-' + key" class="pg-input"
-                rows="4" style="resize:vertical"
-                [value]="inputVal(key)"
-                (input)="setVal(key, $any($event.target).value)"></textarea>
-            } @else if (getProp(key).type === 'number' || getProp(key).type === 'integer') {
-              <input type="number" [id]="'pg-field-' + key" class="pg-input"
-                [value]="inputVal(key)"
-                (input)="setVal(key, $any($event.target).value)" />
-            } @else {
-              <input type="text" [id]="'pg-field-' + key" class="pg-input"
-                [value]="inputVal(key)"
-                (input)="setVal(key, $any($event.target).value)" />
-            }
-          </div>
-        }
+<div class="h-full flex flex-col min-h-0">
+  <div class="flex-1 min-h-0 grid grid-cols-[11rem_1fr_1fr] overflow-hidden">
+
+    <!-- Column 1: Tool sidebar -->
+    <aside class="flex flex-col border-r border-(--color-border) overflow-y-auto">
+      @for (s of schemas(); track s.name) {
+        <button
+          class="w-full text-left px-3 py-[0.4rem] text-[0.78rem] font-mono
+                 flex items-center gap-2 border-l-2 transition-colors duration-100
+                 cursor-pointer bg-transparent
+                 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset
+                 focus-visible:ring-(--color-indigo)"
+          [class]="selectedTool() === s.name
+            ? 'border-(--color-indigo) text-(--color-indigo) bg-[color-mix(in_srgb,var(--color-indigo)_8%,transparent)]'
+            : 'border-transparent text-(--color-muted) hover:text-(--color-text) hover:border-(--color-border)'"
+          (click)="handleToolChange(s.name)">
+          <span class="text-[0.5rem] leading-none"
+                [class]="selectedTool() === s.name ? 'text-(--color-indigo)' : 'text-(--color-border-input)'">●</span>
+          {{ s.name }}
+        </button>
       }
-    </div>
+    </aside>
+
+    <!-- Column 2: Form -->
+    <section class="flex flex-col min-h-0 border-r border-(--color-border) px-4 py-3">
+
+      <!-- Header -->
+      <div class="shrink-0 mb-3">
+        @if (selectedTool()) {
+          <div class="flex items-center justify-between gap-3">
+            <div class="font-mono text-[1.1rem] text-(--color-sky) font-semibold leading-tight">{{ selectedTool() }}</div>
+            <div class="flex items-center gap-2 shrink-0">
+              @if (runStatus()) {
+                <span class="text-[0.75rem] font-mono"
+                      [class]="runStatus()!.ok ? 'text-(--color-ok)' : 'text-(--color-err)'">
+                  {{ runStatus()!.text }}
+                </span>
+              }
+              <span class="text-[0.65rem] text-(--color-muted) select-none">⌘↩</span>
+              <button
+                class="bg-(--color-action) text-white border-none px-4 py-[0.35rem] font-mono
+                       cursor-pointer rounded-[3px] text-[0.85rem] font-semibold
+                       transition-colors duration-100
+                       hover:not-disabled:bg-(--color-action-hover)
+                       disabled:opacity-40 disabled:cursor-not-allowed
+                       focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--color-indigo)"
+                [disabled]="running() || !selectedTool()"
+                (click)="handleRun()">
+                {{ running() ? '…' : 'Run ▶' }}
+              </button>
+            </div>
+          </div>
+          @if (shortDescription()) {
+            <div class="text-[0.75rem] text-(--color-muted) mt-1 leading-snug">{{ shortDescription() }}</div>
+          }
+        } @else {
+          <div class="text-[0.78rem] text-(--color-muted) italic">Select a tool from the left</div>
+        }
+      </div>
+
+      <!-- Scrollable fields -->
+      <div class="flex-1 min-h-0 overflow-y-auto">
+        @if (schema()) {
+
+          @for (key of allKeys(); track key) {
+            <div class="mb-3">
+              <label class="flex items-baseline gap-2 mb-1 min-w-0" [for]="'pg-field-' + key">
+                <span class="font-mono text-[0.78rem] text-(--color-indigo) shrink-0">{{ key }}@if (isRequired(key)) {<span class="text-(--color-err)"> *</span>}</span>
+                @if (getProp(key).description && getEnumOpts(key).length === 0) {
+                  <span class="text-[0.68rem] text-(--color-muted) leading-tight">{{ getProp(key).description }}</span>
+                }
+              </label>
+              @if (getEnumOpts(key).length > 0) {
+                <select [id]="'pg-field-' + key"
+                  class="w-full bg-(--color-deep) text-(--color-text) border border-(--color-border-input)
+                         px-[0.35rem] py-[0.35rem] font-mono text-[0.78rem] cursor-pointer
+                         focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--color-indigo)
+                         transition-colors duration-100"
+                  (change)="setVal(key, $any($event.target).value)">
+                  @for (opt of getEnumOpts(key); track opt.value) {
+                    <option [value]="opt.value" [selected]="opt.value === inputVal(key)">{{ opt.label }}</option>
+                  }
+                </select>
+              } @else if (getProp(key).type === 'boolean') {
+                <input type="checkbox" [id]="'pg-field-' + key"
+                  class="accent-(--color-indigo) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--color-indigo)"
+                  [checked]="isChecked(key)"
+                  (change)="setVal(key, $any($event.target).checked)" />
+              } @else if (key === 'content' && getProp(key).type === 'string') {
+                <textarea [id]="'pg-field-' + key" rows="4"
+                  class="w-full bg-(--color-deep) text-(--color-text) border border-(--color-border-input)
+                         px-[0.35rem] py-[0.35rem] font-mono text-[0.78rem] resize-y
+                         focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--color-indigo)
+                         transition-colors duration-100"
+                  [value]="inputVal(key)"
+                  (input)="setVal(key, $any($event.target).value)"></textarea>
+              } @else if (getProp(key).type === 'number' || getProp(key).type === 'integer') {
+                <input type="number" [id]="'pg-field-' + key"
+                  class="w-full bg-(--color-deep) text-(--color-text) border border-(--color-border-input)
+                         px-[0.35rem] py-[0.35rem] font-mono text-[0.78rem]
+                         focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--color-indigo)
+                         transition-colors duration-100"
+                  [value]="inputVal(key)"
+                  (input)="setVal(key, $any($event.target).value)" />
+              } @else {
+                <input type="text" [id]="'pg-field-' + key"
+                  class="w-full bg-(--color-deep) text-(--color-text) border border-(--color-border-input)
+                         px-[0.35rem] py-[0.35rem] font-mono text-[0.78rem]
+                         focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--color-indigo)
+                         transition-colors duration-100"
+                  [value]="inputVal(key)"
+                  (input)="setVal(key, $any($event.target).value)" />
+              }
+            </div>
+          }
+
+        }
+      </div>
+
+    </section>
+
+    <!-- Column 3: Output -->
+    <section class="flex flex-col min-h-0 px-3 py-3">
+
+      <!-- Output header -->
+      <div class="shrink-0 flex items-center justify-between mb-2">
+        <span class="text-[0.65rem] font-semibold tracking-widest text-(--color-muted) uppercase">Output</span>
+        @if (output()) {
+          <button
+            class="text-[0.72rem] font-mono text-(--color-muted) hover:text-(--color-text)
+                   bg-transparent border border-(--color-border) px-2 py-[0.15rem] rounded-[3px]
+                   cursor-pointer transition-colors duration-100
+                   focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-(--color-indigo)"
+            (click)="handleCopy()">
+            {{ copied() ? '✓ copied' : 'copy' }}
+          </button>
+        }
+      </div>
+
+      <pre class="flex-1 min-h-0 overflow-auto bg-(--color-deep) border border-(--color-border)
+                  rounded-[4px] px-3 py-3 text-[0.78rem] whitespace-pre-wrap break-all m-0
+                  text-(--color-text)">{{ formattedOutput() || output() }}</pre>
+
+    </section>
+
   </div>
-  <div style="margin-top:0.75rem;display:flex;align-items:center">
-    <button id="pg-run" [disabled]="running() || !selectedTool()" (click)="handleRun()">
-      Run &#9654;
-    </button>
-    @if (runStatus()) {
-      <span id="pg-status" [class]="runStatus()!.ok ? 'ok' : 'err'">{{ runStatus()!.text }}</span>
-    }
-  </div>
-  <pre id="pg-out">{{ output() }}</pre>
 </div>

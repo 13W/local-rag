@@ -1,8 +1,13 @@
-<table id="stats-tbl">
+<table>
   <thead>
     <tr>
-      <th>Tool</th><th>Calls</th><th>Bytes In</th><th>Bytes Out</th>
-      <th>Avg ms</th><th>Est Tokens</th><th>Errors</th>
+      <th class="sticky top-0 z-10">Tool</th>
+      <th class="sticky top-0 z-10">Calls</th>
+      <th class="sticky top-0 z-10">Bytes In</th>
+      <th class="sticky top-0 z-10">Bytes Out</th>
+      <th class="sticky top-0 z-10">Avg ms</th>
+      <th class="sticky top-0 z-10">Est Tokens</th>
+      <th class="sticky top-0 z-10">Errors</th>
     </tr>
   </thead>
   <tbody>
@@ -14,7 +19,13 @@
         <td>{{ fmtBytes(row[1].bytesOut) }}</td>
         <td>{{ row[1].avgMs.toFixed(0) }}</td>
         <td>{{ row[1].tokensEst }}</td>
-        <td [class]="row[1].errors > 0 ? 'err' : 'ok'">{{ row[1].errors }}</td>
+        <td [class]="row[1].errors > 0 ? 'text-(--color-err)' : 'text-(--color-ok)'">
+          {{ row[1].errors }}
+        </td>
+      </tr>
+    } @empty {
+      <tr>
+        <td colspan="7" class="text-center text-(--color-muted) py-4 italic">no data yet</td>
       </tr>
     }
   </tbody>

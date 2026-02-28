@@ -1,7 +1,15 @@
-<div class="log-wrap">
-  <table id="log-tbl">
+<div class="h-full overflow-y-auto border border-(--color-border) rounded-[4px]">
+  <table>
     <thead>
-      <tr><th>Time</th><th>Tool</th><th>Source</th><th>In</th><th>Out</th><th>ms</th><th>OK</th></tr>
+      <tr>
+        <th class="sticky top-0 z-10">Time</th>
+        <th class="sticky top-0 z-10">Tool</th>
+        <th class="sticky top-0 z-10">Source</th>
+        <th class="sticky top-0 z-10">In</th>
+        <th class="sticky top-0 z-10">Out</th>
+        <th class="sticky top-0 z-10">ms</th>
+        <th class="sticky top-0 z-10">OK</th>
+      </tr>
     </thead>
     <tbody>
       @for (e of entries(); track e.ts + e.tool) {
@@ -12,7 +20,13 @@
           <td>{{ e.source === 'watcher' ? '—' : fmtBytes(e.bytesIn) }}</td>
           <td>{{ outVal(e) }}</td>
           <td>{{ e.ms }}</td>
-          <td [class]="e.ok ? 'ok' : 'err'">{{ e.ok ? '✓' : '✗' }}</td>
+          <td [class]="e.ok ? 'text-(--color-ok)' : 'text-(--color-err)'">
+            {{ e.ok ? '✓' : '✗' }}
+          </td>
+        </tr>
+      } @empty {
+        <tr>
+          <td colspan="7" class="text-center text-(--color-muted) py-4 italic">no data yet</td>
         </tr>
       }
     </tbody>

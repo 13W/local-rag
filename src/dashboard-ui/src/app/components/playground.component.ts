@@ -1,7 +1,14 @@
-import { Component, computed, input, signal } from "@angular/core";
+import { Component, computed, HostListener, input, signal } from "@angular/core";
 import type { PropSchema, ToolSchemaDef } from "../../types";
 
 interface RunResult { ok: boolean; result?: string; error?: string; ms: number; }
+
+function formatJson(raw: string): string {
+  const trimmed = raw.trim();
+  if (!/^[{[]/.test(trimmed)) return raw;
+  const parsed = JSON.parse(trimmed) as unknown;
+  return JSON.stringify(parsed, null, 2);
+}
 
 @Component({
   selector: "app-playground",
@@ -16,11 +23,31 @@ export class PlaygroundComponent {
   readonly running      = signal(false);
   readonly runStatus    = signal<{ text: string; ok: boolean } | null>(null);
   readonly output       = signal("");
+  readonly copied       = signal(false);
 
-  readonly schema   = computed(() => this.schemas().find(s => s.name === this.selectedTool()));
-  readonly props    = computed(() => this.schema()?.inputSchema.properties ?? {});
-  readonly required = computed(() => this.schema()?.inputSchema.required   ?? []);
-  readonly propKeys = computed(() => Object.keys(this.props()));
+  readonly schema      = computed(() => this.schemas().find(s => s.name === this.selectedTool()));
+  readonly props       = computed(() => this.schema()?.inputSchema.properties ?? {});
+  readonly required    = computed(() => this.schema()?.inputSchema.required   ?? []);
+  readonly propKeys    = computed(() => Object.keys(this.props()));
+  readonly requiredKeys = computed(() => this.propKeys().filter(k => this.isRequired(k)));
+  readonly optionalKeys = computed(() => this.propKeys().filter(k => !this.isRequired(k)));
+  readonly allKeys      = computed(() => [...this.requiredKeys(), ...this.optionalKeys()]);
+  readonly shortDescription = computed(() => {
+    const desc = this.schema()?.description ?? "";
+    const nl = desc.indexOf('\n');
+    return nl > -1 ? desc.slice(0, nl) : desc;
+  });
+  readonly formattedOutput = computed(() => formatJson(this.output()));
+
+  @HostListener('document:keydown', ['$event'])
+  handleKeydown(event: KeyboardEvent): void {
+    if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+      if (!this.running() && this.selectedTool()) {
+        event.preventDefault();
+        this.handleRun();
+      }
+    }
+  }
 
   handleToolChange(name: string): void {
     this.selectedTool.set(name);
@@ -42,6 +69,29 @@ export class PlaygroundComponent {
   inputVal(key: string): string {
     const p = this.getProp(key); const v = this.getVal(key);
     return v !== undefined ? String(v) : (p.default !== undefined ? String(p.default) : "");
+  }
+
+  // Returns enum options from `enum` field (new server format) or parses
+  // pipe-separated description like "a | b | c | (empty = all)" (old format).
+  getEnumOpts(key: string): Array<{ value: string; label: string }> {
+    const p = this.getProp(key);
+    if (p.enum && p.enum.length > 0) {
+      return (p.enum as string[]).map(v => ({ value: v, label: v === '' ? '(empty)' : v }));
+    }
+    if (p.description?.includes(' | ')) {
+      return p.description.split(' | ').map(part =>
+        /^\(/.test(part) ? { value: '', label: part } : { value: part, label: part }
+      );
+    }
+    return [];
+  }
+
+  handleCopy(): void {
+    const text = this.formattedOutput() || this.output();
+    navigator.clipboard.writeText(text).then(() => {
+      this.copied.set(true);
+      setTimeout(() => this.copied.set(false), 1500);
+    });
   }
 
   handleRun(): void {

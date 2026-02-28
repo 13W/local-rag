@@ -1,18 +1,44 @@
-<div class="info-bar">
-  <span class="info-tag"><span class="lbl">project</span> <span class="val">{{ info().projectId }}</span></span>
-  <span class="info-tag"><span class="lbl">agent</span>   <span class="val">{{ info().agentId }}</span></span>
-  <span class="info-tag"><span class="lbl">v</span>       <span class="val">{{ info().version }}</span></span>
-  <span class="info-tag"><span class="lbl">index</span>
-    <span [class]="'val ' + (info().watch ? 'on' : 'off')">{{ info().watch ? '✓ on' : '✗ off' }}</span>
+<div class="flex flex-wrap gap-x-2.5 gap-y-1 mt-1.5 mb-4 text-[0.76rem]">
+
+  <span class="inline-flex items-center gap-1 bg-(--color-surface) px-[0.45rem] py-[0.15rem] rounded-[3px] whitespace-nowrap">
+    <span class="text-(--color-muted)">project</span>
+    <span class="text-(--color-text)">{{ info().projectId }}</span>
   </span>
-  <span class="info-tag"><span class="lbl">descriptions</span>
-    <span [class]="'val ' + (info().generateDescriptions ? 'on' : 'off')">{{ info().generateDescriptions ? '✓ on' : '✗ off' }}</span>
+  <span class="inline-flex items-center gap-1 bg-(--color-surface) px-[0.45rem] py-[0.15rem] rounded-[3px] whitespace-nowrap">
+    <span class="text-(--color-muted)">agent</span>
+    <span class="text-(--color-text)">{{ info().agentId }}</span>
+  </span>
+  <span class="inline-flex items-center gap-1 bg-(--color-surface) px-[0.45rem] py-[0.15rem] rounded-[3px] whitespace-nowrap">
+    <span class="text-(--color-muted)">v</span>
+    <span class="text-(--color-text)">{{ info().version }}</span>
+  </span>
+  <span class="inline-flex items-center gap-1 bg-(--color-surface) px-[0.45rem] py-[0.15rem] rounded-[3px] whitespace-nowrap">
+    <span class="text-(--color-muted)">index</span>
+    <span [class]="info().watch ? 'text-(--color-ok)' : 'text-(--color-err)'">
+      {{ info().watch ? '✓ on' : '✗ off' }}
+    </span>
+  </span>
+  <span class="inline-flex items-center gap-1 bg-(--color-surface) px-[0.45rem] py-[0.15rem] rounded-[3px] whitespace-nowrap">
+    <span class="text-(--color-muted)">descriptions</span>
+    <span [class]="info().generateDescriptions ? 'text-(--color-ok)' : 'text-(--color-err)'">
+      {{ info().generateDescriptions ? '✓ on' : '✗ off' }}
+    </span>
   </span>
   @if (info().branch) {
-    <span class="info-tag"><span class="lbl">branch</span> <span class="val branch">{{ info().branch }}</span></span>
+    <span class="inline-flex items-center gap-1 bg-(--color-surface) px-[0.45rem] py-[0.15rem] rounded-[3px] whitespace-nowrap">
+      <span class="text-(--color-muted)">branch</span>
+      <span class="text-(--color-amber)">{{ info().branch }}</span>
+    </span>
   }
   @if (info().collectionPrefix) {
-    <span class="info-tag"><span class="lbl">prefix</span> <span class="val">{{ info().collectionPrefix }}</span></span>
+    <span class="inline-flex items-center gap-1 bg-(--color-surface) px-[0.45rem] py-[0.15rem] rounded-[3px] whitespace-nowrap">
+      <span class="text-(--color-muted)">prefix</span>
+      <span class="text-(--color-text)">{{ info().collectionPrefix }}</span>
+    </span>
   }
-  <span class="info-tag"><span class="lbl">embed</span> <span class="val">{{ info().embedProvider }}:{{ info().embedModel }}</span></span>
+  <span class="inline-flex items-center gap-1 bg-(--color-surface) px-[0.45rem] py-[0.15rem] rounded-[3px] whitespace-nowrap">
+    <span class="text-(--color-muted)">embed</span>
+    <span class="text-(--color-text)">{{ info().embedProvider }}:{{ info().embedModel }}</span>
+  </span>
+
 </div>
