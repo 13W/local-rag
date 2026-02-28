@@ -199,6 +199,46 @@ Or in `.mcp.json`:
 
 ---
 
+### Agent workflow setup
+
+Run `init` once in your project root after registering the MCP plugin.
+It installs hooks that enforce the recall → search → remember protocol on every session and prompt, and writes reference guides into `.claude/rules/` so Claude always has the tool conventions at hand.
+
+```bash
+npx @13w/local-rag init
+
+# If installed globally
+local-rag init
+```
+
+Output:
+
+```
+wrote  .claude/hooks/session-start.sh
+wrote  .claude/hooks/prompt-reminder.sh
+wrote  .claude/settings.json
+wrote  .claude/settings.local.json
+wrote  .claude/rules/continuous-remember.md
+wrote  .claude/rules/memory-protocol-reference.md
+wrote  .claude/rules/serena-conventions.md
+```
+
+What each file does:
+
+| File | Purpose |
+|------|---------|
+| `hooks/session-start.sh` | Injects the full protocol cheatsheet as a `system-reminder` at every session start and after context compaction |
+| `hooks/prompt-reminder.sh` | Fires on every user prompt — reminds Claude to `recall()` before acting and `remember()` after |
+| `rules/continuous-remember.md` | When and how to call `remember()` immediately (trigger events, format, anti-patterns) |
+| `rules/memory-protocol-reference.md` | Full tool reference with parameter tables and call examples |
+| `rules/serena-conventions.md` | Serena vs Memory MCP routing guide and end-to-end editing workflow |
+| `settings.json` | Registers the hooks in Claude Code (commit this) |
+| `settings.local.json` | Local hook overrides — add to `.gitignore` |
+
+Commit `.claude/hooks/`, `.claude/rules/`, and `.claude/settings.json` to share the workflow with your team.
+
+---
+
 ## Configuration
 
 Create `.memory.json` in your project root (auto-discovered if present):
@@ -312,4 +352,6 @@ To use a fixed port or disable the dashboard:
 
 ## Agent Protocol
 
-Copy `CLAUDE.md` into your project to give Claude Code the full `RECALL → SEARCH_CODE → THINK → ACT → REMEMBER` protocol, including how local-rag and Serena complement each other.
+Run `local-rag init` (see [Agent workflow setup](#agent-workflow-setup)) to install the full
+`RECALL → SEARCH_CODE → THINK → ACT → REMEMBER` protocol into your project.
+The hooks fire automatically — no manual prompting required.
