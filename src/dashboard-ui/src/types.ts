@@ -20,12 +20,15 @@ export interface RequestEntry {
 }
 
 export interface PropSchema {
-  type?:    string;
-  default?: unknown;
+  type?:        string;
+  description?: string;
+  default?:     unknown;
+  enum?:        unknown[];
 }
 
 export interface ToolSchemaDef {
-  name: string;
+  name:         string;
+  description?: string;
   inputSchema: {
     properties: Record<string, PropSchema>;
     required:   string[];
