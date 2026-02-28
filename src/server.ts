@@ -2,11 +2,13 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
   CallToolRequestSchema,
+  ErrorCode,
   ListToolsRequestSchema,
+  McpError,
 } from "@modelcontextprotocol/sdk/types.js";
 
 import { ensureCollections } from "./qdrant.js";
-import { record, startDashboard, broadcastShutdown } from "./dashboard.js";
+import { record, startDashboard, broadcastShutdown, broadcastError } from "./dashboard.js";
 import { CodeIndexer }  from "./indexer/indexer.js";
 import { startWatcher } from "./indexer/watcher.js";
 import { cfg } from "./config.js";
@@ -146,6 +148,9 @@ const TOOLS = [
   },
 ];
 
+// Fast name→tool lookup used for validation
+const TOOL_MAP = new Map(TOOLS.map(t => [t.name, t]));
+
 // ── Argument helpers ─────────────────────────────────────────────────────────
 
 function str(v: unknown, def = ""): string    { return typeof v === "string"  ? v : def; }
@@ -227,7 +232,7 @@ export async function dispatchTool(name: string, a: Record<string, unknown>): Pr
 
 const server = new Server(
   { name: "Claude Memory + Code RAG", version: "2.0.0" },
-  { capabilities: { tools: {} } }
+  { capabilities: { tools: {}, resources: {}, prompts: {}, logging: {} } }
 );
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
@@ -235,19 +240,51 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }))
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name } = request.params;
   const a = (request.params.arguments ?? {}) as Record<string, unknown>;
+
+  // 1. Validate tool exists
+  const tool = TOOL_MAP.get(name);
+  if (!tool) {
+    throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${name}`);
+  }
+
+  // 2. Validate required arguments are present
+  const required = (tool.inputSchema.required ?? []) as string[];
+  const missing = required.filter(k => !(k in a));
+  if (missing.length > 0) {
+    throw new McpError(ErrorCode.InvalidParams, `Missing required argument(s): ${missing.join(", ")}`);
+  }
+
   const bytesIn = JSON.stringify(a).length;
   const t0 = Date.now();
 
-  let ok = false;
-  return dispatchTool(name, a)
-    .then((text) => {
-      ok = true;
-      record(name, "mcp", bytesIn, text.length, Date.now() - t0, true);
-      return { content: [{ type: "text" as const, text }] };
-    })
-    .finally(() => {
-      if (!ok) record(name, "mcp", bytesIn, 0, Date.now() - t0, false);
-    });
+  // 3. Execute; wrap unexpected errors as InternalError
+  try {
+    const text = await dispatchTool(name, a);
+    record(name, "mcp", bytesIn, text.length, Date.now() - t0, true);
+    return { content: [{ type: "text" as const, text }] };
+  } catch (err) {
+    record(name, "mcp", bytesIn, 0, Date.now() - t0, false);
+    if (err instanceof McpError) throw err;
+    throw new McpError(
+      ErrorCode.InternalError,
+      err instanceof Error ? err.message : String(err),
+    );
+  }
+});
+
+// ── Global error capture ─────────────────────────────────────────────────────
+
+process.on("uncaughtException", (err: Error) => {
+  process.stderr.write(`[memory] uncaughtException: ${err.stack ?? err.message}\n`);
+  if (cfg.dashboard) broadcastError(err);
+  setTimeout(() => process.exit(1), 250);
+});
+
+process.on("unhandledRejection", (reason: unknown) => {
+  const err = reason instanceof Error ? reason : new Error(String(reason));
+  process.stderr.write(`[memory] unhandledRejection: ${err.stack ?? err.message}\n`);
+  if (cfg.dashboard) broadcastError(err);
+  setTimeout(() => process.exit(1), 250);
 });
 
 // ── Startup ──────────────────────────────────────────────────────────────────
@@ -257,7 +294,14 @@ if (cfg.dashboard) startDashboard(cfg.dashboardPort, TOOLS, dispatchTool);
 if (cfg.watch) {
   const root = cfg.projectRoot || process.cwd();
   const indexer = new CodeIndexer({ generateDescriptions: cfg.generateDescriptions });
-  startWatcher(root, indexer);
+  startWatcher(root, indexer, (relPath, chunks) => {
+    server.notification({
+      method: "notifications/message",
+      params: { level: "info", logger: "watcher", data: `Reindexed ${relPath}: ${chunks} chunks` },
+    }).catch((err: unknown) => {
+      process.stderr.write(`[watcher] notification error: ${String(err)}\n`);
+    });
+  });
 }
 process.stderr.write("[memory] MCP server ready\n");
 
@@ -266,5 +310,5 @@ await server.connect(transport);
 
 process.stdin.once("close", () => {
   if (cfg.dashboard) broadcastShutdown();
-  process.exit(0);
+  server.close().finally(() => process.exit(0));
 });

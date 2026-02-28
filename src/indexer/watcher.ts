@@ -4,7 +4,11 @@ import type { CodeIndexer } from "./indexer.js";
 import { cfg } from "../config.js";
 import { recordIndex } from "../dashboard.js";
 
-export function startWatcher(root: string, indexer: CodeIndexer): void {
+export function startWatcher(
+  root: string,
+  indexer: CodeIndexer,
+  onReindex?: (relPath: string, chunks: number) => void,
+): void {
   const absRoot = resolve(root);
 
   const watcher = watch(absRoot, { recursive: true }, (event, filename) => {
@@ -22,6 +26,7 @@ export function startWatcher(root: string, indexer: CodeIndexer): void {
         .then((n) => {
           process.stderr.write(`[watcher] re-indexed ${relPath}: ${n} chunks\n`);
           recordIndex(relPath, n, Date.now() - t0, true);
+          onReindex?.(relPath, n);
         })
         .catch((err: unknown) => {
           process.stderr.write(`[watcher] error ${relPath}: ${String(err)}\n`);
