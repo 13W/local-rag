@@ -32,7 +32,7 @@
   ],
   "scripts": {
     "build:ui": "pnpm -C src/dashboard-ui run build",
-    "build": "pnpm run build:ui && tsc",
+    "build": "pnpm run build:ui && tsc && mkdir -p dist/rules && cp src/rules/*.md dist/rules/",
     "start": "node dist/bin.js serve",
     "index": "node dist/bin.js index",
     "watch": "node dist/bin.js watch",

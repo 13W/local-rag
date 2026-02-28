@@ -1,5 +1,14 @@
 import { mkdirSync, writeFileSync, chmodSync, existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const RULES_DIR = join(dirname(fileURLToPath(import.meta.url)), "rules");
+
+const RULES = [
+  "continuous-remember.md",
+  "memory-protocol-reference.md",
+  "serena-conventions.md",
+] as const;
 
 const SESSION_START_SH = `#!/usr/bin/env bash
 # Injected at session start and after context compaction.
@@ -68,6 +77,15 @@ const SETTINGS_HOOKS = {
   },
 };
 
+function writeSettings(filePath: string, label: string): void {
+  const existing: Record<string, unknown> = existsSync(filePath)
+    ? (JSON.parse(readFileSync(filePath, "utf8")) as Record<string, unknown>)
+    : {};
+  const merged = { ...existing, ...SETTINGS_HOOKS };
+  writeFileSync(filePath, JSON.stringify(merged, null, 2) + "\n");
+  process.stdout.write(`wrote  ${label}\n`);
+}
+
 export function init(cwd: string = process.cwd()): void {
   const hooksDir = join(cwd, ".claude", "hooks");
   mkdirSync(hooksDir, { recursive: true });
@@ -82,16 +100,18 @@ export function init(cwd: string = process.cwd()): void {
   chmodSync(promptReminder, 0o755);
   process.stdout.write("wrote  .claude/hooks/prompt-reminder.sh\n");
 
-  const settingsPath = join(cwd, ".claude", "settings.json");
-  const existing: Record<string, unknown> = existsSync(settingsPath)
-    ? (JSON.parse(readFileSync(settingsPath, "utf8")) as Record<string, unknown>)
-    : {};
+  writeSettings(join(cwd, ".claude", "settings.json"),       ".claude/settings.json");
+  writeSettings(join(cwd, ".claude", "settings.local.json"), ".claude/settings.local.json");
 
-  const merged = { ...existing, ...SETTINGS_HOOKS };
-  writeFileSync(settingsPath, JSON.stringify(merged, null, 2) + "\n");
-  process.stdout.write("wrote  .claude/settings.json\n");
+  const rulesDir = join(cwd, ".claude", "rules");
+  mkdirSync(rulesDir, { recursive: true });
+  for (const name of RULES) {
+    writeFileSync(join(rulesDir, name), readFileSync(join(RULES_DIR, name)));
+    process.stdout.write(`wrote  .claude/rules/${name}\n`);
+  }
 
   process.stdout.write(
-    "\nDone. Commit .claude/hooks/ and .claude/settings.json to share hooks with your team.\n",
+    "\nDone. Commit .claude/hooks/, .claude/rules/, and .claude/settings.json to share with your team.\n" +
+    "      .claude/settings.local.json is for local-only overrides — keep it git-ignored.\n",
   );
 }
