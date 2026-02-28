@@ -81,6 +81,14 @@ export class CodeIndexer {
       if (IGNORE_DIRS.has(part)) return true;
     }
     if (this.ignFilter?.isIgnored(absPath)) return true;
+    if (cfg.includePaths.length > 0) {
+      const base = resolve(cfg.projectRoot || ".");
+      const included = cfg.includePaths.some(p => {
+        const abs = resolve(base, p);
+        return absPath.startsWith(abs + "/") || absPath === abs;
+      });
+      if (!included) return true;
+    }
     return false;
   }
 
