@@ -122,6 +122,13 @@ export function broadcastShutdown(): void {
   for (const res of new Set(sseClients)) res.write(data);
 }
 
+export function broadcastError(err: unknown): void {
+  const message = err instanceof Error ? err.message : String(err);
+  const stack   = err instanceof Error ? (err.stack ?? "") : "";
+  const data = `data: ${JSON.stringify({ type: "error", message, stack, ts: Date.now() })}\n\n`;
+  for (const res of new Set(sseClients)) res.write(data);
+}
+
 function getCurrentBranch(root: string): string {
   const r = spawnSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
     cwd: root || process.cwd(),

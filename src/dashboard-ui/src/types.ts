@@ -47,6 +47,12 @@ export interface ServerInfo {
   generateDescriptions: boolean;
 }
 
+export interface ProcessError {
+  message: string;
+  stack:   string;
+  ts:      number;
+}
+
 export interface InitData {
   stats:      Record<string, ToolStats>;
   log:        RequestEntry[];

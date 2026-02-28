@@ -16,4 +16,5 @@ export class AppComponent implements OnInit {
   readonly tab  = signal<'dashboard' | 'playground'>('dashboard');
   constructor(readonly sse: SseService) {}
   ngOnInit(): void { this.sse.connect(this.init); }
+  fmtTime(ts: number): string { return new Date(ts).toTimeString().slice(0, 8); }
 }
