@@ -33,6 +33,7 @@ interface RequestEntry {
   ms:       number;
   ok:       boolean;
   chunks?:  number;
+  error?:   string;
 }
 
 type DispatchFn = (tool: string, args: Record<string, unknown>) => Promise<string>;
@@ -82,7 +83,7 @@ function statsSnapshot(): Record<string, ToolStats & { avgMs: number; tokensEst:
   return out;
 }
 
-export function record(tool: string, source: "mcp" | "playground", bytesIn: number, bytesOut: number, ms: number, ok: boolean): void {
+export function record(tool: string, source: "mcp" | "playground", bytesIn: number, bytesOut: number, ms: number, ok: boolean, error?: string): void {
   const prev = toolStats.get(tool) ?? { calls: 0, bytesIn: 0, bytesOut: 0, totalMs: 0, errors: 0 };
   toolStats.set(tool, {
     calls:    prev.calls    + 1,
@@ -92,7 +93,7 @@ export function record(tool: string, source: "mcp" | "playground", bytesIn: numb
     errors:   prev.errors   + (ok ? 0 : 1),
   });
 
-  const entry: RequestEntry = { ts: Date.now(), tool, source, bytesIn, bytesOut, ms, ok };
+  const entry: RequestEntry = { ts: Date.now(), tool, source, bytesIn, bytesOut, ms, ok, ...(error ? { error } : {}) };
   requestLog.push(entry);
   if (requestLog.length > LOG_MAX) requestLog.shift();
 
@@ -187,7 +188,9 @@ fastify.post<{ Body: { tool: string; args: Record<string, unknown> } }>("/api/ru
       void reply.send({ ok: true, result, ms });
     })
     .catch((err: unknown) => {
-      const ms = Date.now() - t0;
+      const ms     = Date.now() - t0;
+      const errStr = err instanceof Error ? (err.stack ?? err.message) : String(err);
+      record(tool, "playground", bytesIn, 0, ms, false, errStr);
       void reply.code(500).send({ ok: false, error: String(err), ms });
     });
 });

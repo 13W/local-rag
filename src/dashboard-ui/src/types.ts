@@ -17,6 +17,7 @@ export interface RequestEntry {
   ms:       number;
   ok:       boolean;
   chunks?:  number;
+  error?:   string;
 }
 
 export interface PropSchema {

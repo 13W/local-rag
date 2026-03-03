@@ -263,7 +263,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     record(name, "mcp", bytesIn, text.length, Date.now() - t0, true);
     return { content: [{ type: "text" as const, text }] };
   } catch (err) {
-    record(name, "mcp", bytesIn, 0, Date.now() - t0, false);
+    const errStr = err instanceof Error ? (err.stack ?? err.message) : String(err);
+    record(name, "mcp", bytesIn, 0, Date.now() - t0, false, errStr);
     if (err instanceof McpError) throw err;
     throw new McpError(
       ErrorCode.InternalError,

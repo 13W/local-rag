@@ -1,4 +1,4 @@
-import { Component, input } from "@angular/core";
+import { Component, input, signal } from "@angular/core";
 import type { RequestEntry } from "../../types";
 
 @Component({
@@ -8,6 +8,8 @@ import type { RequestEntry } from "../../types";
 })
 export class RequestLogComponent {
   readonly entries = input.required<RequestEntry[]>();
+  private expandedKey = signal<string | null>(null);
+
   fmtBytes(n: number): string { return n >= 1024 ? (n / 1024).toFixed(1) + "K" : String(n); }
   fmtTime(ts: number): string { return new Date(ts).toTimeString().slice(0, 8); }
   srcClass(e: RequestEntry): string {
@@ -20,5 +22,13 @@ export class RequestLogComponent {
     return e.source === "watcher"
       ? (e.chunks != null ? `${e.chunks}\u00a0ch` : "—")
       : this.fmtBytes(e.bytesOut);
+  }
+  toggleRow(e: RequestEntry): void {
+    if (!e.error) return;
+    const key = `${e.ts}:${e.tool}`;
+    this.expandedKey.update(k => k === key ? null : key);
+  }
+  isExpanded(e: RequestEntry): boolean {
+    return this.expandedKey() === `${e.ts}:${e.tool}`;
   }
 }

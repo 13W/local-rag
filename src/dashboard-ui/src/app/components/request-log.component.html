@@ -13,7 +13,10 @@
     </thead>
     <tbody>
       @for (e of entries(); track e.ts + e.tool) {
-        <tr>
+        <tr
+          [class.cursor-pointer]="!e.ok && !!e.error"
+          (click)="toggleRow(e)"
+        >
           <td>{{ fmtTime(e.ts) }}</td>
           <td>{{ e.tool }}</td>
           <td><span [class]="srcClass(e)">{{ srcLabel(e) }}</span></td>
@@ -21,9 +24,18 @@
           <td>{{ outVal(e) }}</td>
           <td>{{ e.ms }}</td>
           <td [class]="e.ok ? 'text-(--color-ok)' : 'text-(--color-err)'">
-            {{ e.ok ? '✓' : '✗' }}
+            {{ e.ok ? '✓' : '✗' }}{{ !e.ok && e.error ? (isExpanded(e) ? ' ▾' : ' ▸') : '' }}
           </td>
         </tr>
+        @if (!e.ok && e.error && isExpanded(e)) {
+          <tr>
+            <td colspan="7" class="p-0">
+              <pre class="m-0 px-3 py-2 text-xs whitespace-pre-wrap break-all
+                          text-(--color-err) bg-(--color-deep)
+                          border-b border-(--color-border)">{{ e.error }}</pre>
+            </td>
+          </tr>
+        }
       } @empty {
         <tr>
           <td colspan="7" class="text-center text-(--color-muted) py-4 italic">no data yet</td>
