@@ -18,8 +18,6 @@ import { CODE_VECTORS, colName } from "../qdrant.js";
 const COLLECTION  = colName("code_chunks");
 const BATCH_SIZE  = 32;
 const DESC_CONCURRENCY = 5;
-// Bump this when parser extraction logic changes to force re-index of all files.
-const PARSER_VERSION = "2";
 const IGNORE_DIRS = new Set([
   "node_modules", ".git", "dist", "build", ".next", "coverage",
   "vendor", "charts", "testdata",
@@ -437,6 +435,88 @@ export class CodeIndexer {
     process.stderr.write(`[indexer] Done: ${files.length} files, ${total} chunks\n`);
   }
 
+  /**
+   * Payload-only repair: finds chunks with empty `name` and updates them
+   * using the current parser — without touching vectors or descriptions.
+   */
+  async repairNames(root: string): Promise<void> {
+    const pathBase = cfg.projectRoot ? resolve(cfg.projectRoot) : root;
+    const affected: Array<{ id: string; filePath: string; startLine: number; chunkType: string }> = [];
+    let offset: string | number | undefined;
+
+    // 1. Collect all empty-name chunks for this project
+    while (true) {
+      const result = await this.qd.scroll(COLLECTION, {
+        filter: {
+          must: [
+            { key: "project_id", match: { value: cfg.projectId } },
+            { key: "name",       match: { value: ""             } },
+          ],
+        },
+        limit:        500,
+        with_payload: ["file_path", "start_line", "chunk_type"],
+        with_vector:  false,
+        ...(offset !== undefined && { offset }),
+      }).catch((): { points: []; next_page_offset: undefined } => ({ points: [], next_page_offset: undefined }));
+
+      for (const p of result.points) {
+        const pl = (p.payload ?? {}) as Record<string, unknown>;
+        affected.push({
+          id:        String(p.id),
+          filePath:  String(pl["file_path"]  ?? ""),
+          startLine: Number(pl["start_line"] ?? 0),
+          chunkType: String(pl["chunk_type"] ?? ""),
+        });
+      }
+      const next = (result as { next_page_offset?: string | number | null }).next_page_offset;
+      if (!next) break;
+      offset = next;
+    }
+
+    if (affected.length === 0) {
+      process.stderr.write("[repair] No unnamed chunks found.\n");
+      return;
+    }
+    const fileCount = new Set(affected.map((a) => a.filePath)).size;
+    process.stderr.write(`[repair] ${affected.length} unnamed chunks across ${fileCount} files\n`);
+
+    // 2. Group by file
+    const byFile = new Map<string, typeof affected>();
+    for (const a of affected) {
+      const arr = byFile.get(a.filePath) ?? [];
+      arr.push(a);
+      byFile.set(a.filePath, arr);
+    }
+
+    // 3. Re-parse each file and patch payload only (vectors/descriptions untouched)
+    let fixed = 0;
+    for (const [relPath, points] of byFile) {
+      const absPath = join(pathBase, relPath);
+      let source: string;
+      try {
+        source = readFileSync(absPath, "utf8");
+      } catch {
+        process.stderr.write(`[repair] cannot read ${relPath}, skipping\n`);
+        continue;
+      }
+
+      const chunks = await parseFile(relPath, source).catch(() => [] as CodeChunk[]);
+      const chunkMap = new Map<string, string>();
+      for (const c of chunks) {
+        if (c.name) chunkMap.set(`${c.chunkType}:${c.startLine}`, c.name);
+      }
+
+      for (const p of points) {
+        const name = chunkMap.get(`${p.chunkType}:${p.startLine}`);
+        if (!name) continue;
+        await this.qd.setPayload(COLLECTION, { payload: { name }, points: [p.id], wait: true } as never);
+        fixed++;
+      }
+    }
+
+    process.stderr.write(`[repair] Done: ${fixed}/${affected.length} chunks repaired\n`);
+  }
+
   async clear(): Promise<void> {
     await this.qd.delete(COLLECTION, {
       filter: { must: [{ key: "project_id", match: { value: cfg.projectId } }] },
@@ -455,7 +535,7 @@ export class CodeIndexer {
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 function hashSource(source: string): string {
-  return createHash("sha256").update(PARSER_VERSION).update(source).digest("hex");
+  return createHash("sha256").update(source).digest("hex");
 }
 
 function buildEmbedContext(c: CodeChunk): string {

@@ -11,6 +11,7 @@ Usage:
   local-rag clear                — remove all indexed chunks for this project
   local-rag stats                — show collection stats
   local-rag file   <abs> <root>  — index a single file
+  local-rag repair <root>        — fix empty symbol names without re-embedding
 
 Options:
   -c, --config <file>         Load options from a JSON config file
@@ -80,6 +81,11 @@ if (cmd === "index") {
   const root    = resolve(arg3 ?? ".");
   const n = await indexer.indexFile(absPath, root);
   process.stdout.write(`${n} chunks indexed\n`);
+  process.exit(0);
+
+} else if (cmd === "repair") {
+  const root = resolve(arg2 ?? ".");
+  await indexer.repairNames(root);
   process.exit(0);
 
 } else {
