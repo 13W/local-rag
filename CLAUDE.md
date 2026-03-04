@@ -10,15 +10,27 @@
 | 1 | `recall(query="task keywords")` | Past decisions, bugs, patterns |
 | 2 | `search_code(query="description")` | Semantic RAG over codebase |
 | 3 | Think + Act | — |
-| 4 | `remember(content, memory_type, tags, importance)` | Store new knowledge |
+| 4 | `remember(content, memory_type, tags, importance)` | Store new knowledge — write in English |
 
 If codebase is **unknown**: call `project_overview()` before step 2.
 
 ---
 
+## Language rule
+
+**All MCP operations must use English only:**
+- `remember(content=...)` — always write in English
+- `recall(query=...)` — always query in English
+- `search_code(query=...)` — always query in English
+- Tags, memory type names, scope values — English only
+
+> Reason: the embedding model is English-optimised; non-English content degrades retrieval quality.
+
+---
+
 ## You are connected to a shared memory and RAG system via MCP
 
-Tools: `recall`, `remember`, `search_code`, `get_file_context`, `get_dependencies`, `project_overview`, `forget`, `consolidate`, `stats`.
+Tools: `recall`, `remember`, `search_code`, `get_symbol`, `find_usages`, `get_file_context`, `get_dependencies`, `project_overview`, `forget`, `consolidate`, `stats`.
 Other agents share the same project-scope memory.
 
 ---
@@ -28,8 +40,16 @@ Other agents share the same project-scope memory.
 ```
 search_code(query)                                    # hybrid mode (default, best)
 search_code(query, chunk_type="function")             # filter by symbol type
+search_code(query, search_mode="lexical")             # literal term match in name/content
 search_code(query, search_mode="semantic")            # conceptual, unknown name
+search_code(query, search_mode="code")                # code vector only
 search_code(query, file_path="src/core")              # restrict to path
+search_code(query, name_pattern="embed")              # filter by symbol name substring
+search_code(query, rerank=true, rerank_k=50, top=5)  # cross-encoder reranking
+
+get_symbol(symbol_id)                                 # retrieve symbol by UUID (from search_code id: field)
+find_usages(symbol_id)                                # find callers/references (lexical + semantic)
+find_usages(symbol_id, limit=10)                      # limit results
 
 get_file_context(file_path)                           # file content + symbol index
 get_file_context(file_path, symbol_name="verifyToken")
@@ -43,9 +63,10 @@ project_overview()                                    # dir tree, entry points, 
 ```
 
 Search modes:
-- `hybrid` (default) — best results in most cases
-- `code` — exact structural match
-- `semantic` — conceptual search when you don't know the name
+- `hybrid` (default) — 3-way RRF (code vector + description vector + lexical leg), best in most cases
+- `lexical` — text index filter, only chunks where query terms literally appear
+- `code` — code vector only, exact structural match
+- `semantic` — description vector only, conceptual search when you don't know the name
 
 ---
 
@@ -55,6 +76,8 @@ Search modes:
 |------|-----|
 | Find code by meaning / concept | `search_code` |
 | Find a symbol by exact name | Serena `find_symbol` |
+| Retrieve symbol by UUID (fast, no I/O) | `get_symbol(uuid)` |
+| Find callers / references of a symbol | `find_usages(uuid)` |
 | Understand project structure | `project_overview` |
 | Read a file / symbol body | Serena `find_symbol(include_body=True)` or `get_file_context` |
 | Check who imports a file | `get_dependencies(direction="imported_by")` |

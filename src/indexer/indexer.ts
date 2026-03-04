@@ -42,7 +42,20 @@ export class CodeIndexer {
       const info    = await this.qd.getCollection(COLLECTION);
       const vectors = info.config?.params?.vectors as Record<string, unknown> | undefined;
       const hasNamedVectors = vectors !== undefined && CODE_VECTORS.code in vectors;
-      if (hasNamedVectors) return;
+      if (hasNamedVectors) {
+        // Idempotent: ensure all indexes exist (mirrors ensureCodeChunks in qdrant.ts).
+        await this.qd.createPayloadIndex(COLLECTION, { field_name: "imports", field_schema: "keyword", wait: true })
+          .catch(() => undefined);
+        // Migrate name index from word → prefix tokenizer so name_pattern substring search works.
+        await this.qd.deletePayloadIndex(COLLECTION, "name").catch(() => undefined);
+        await this.qd.createPayloadIndex(COLLECTION, {
+          field_name: "name", field_schema: { type: "text", tokenizer: "prefix", min_token_len: 2, lowercase: true }, wait: true,
+        }).catch(() => undefined);
+        await this.qd.createPayloadIndex(COLLECTION, {
+          field_name: "content", field_schema: { type: "text", tokenizer: "word", min_token_len: 2, lowercase: true }, wait: true,
+        }).catch(() => undefined);
+        return;
+      }
 
       process.stderr.write(
         `[indexer] Migrating ${COLLECTION} to named vectors (existing index will be cleared)\n`
@@ -56,12 +69,18 @@ export class CodeIndexer {
         [CODE_VECTORS.description]: { size: cfg.embedDim, distance: "Cosine" },
       },
     });
-    for (const field of ["file_path", "chunk_type", "language", "project_id", "parent_id"]) {
+    for (const field of ["file_path", "chunk_type", "language", "project_id", "parent_id", "imports"]) {
       await this.qd.createPayloadIndex(COLLECTION, {
         field_name:   field,
         field_schema: "keyword",
         wait:         true,
       });
+    }
+    for (const [field, schema] of [
+      ["name",    { type: "text", tokenizer: "prefix", min_token_len: 2, lowercase: true }],
+      ["content", { type: "text", tokenizer: "word",   min_token_len: 2, lowercase: true }],
+    ] as const) {
+      await this.qd.createPayloadIndex(COLLECTION, { field_name: field, field_schema: schema, wait: true });
     }
     process.stderr.write(`[indexer] Created collection '${COLLECTION}' (named vectors)\n`);
   }

@@ -1,7 +1,15 @@
 packages:
-  - "src/dashboard-ui"
+  - src/dashboard-ui
+
+ignoredBuiltDependencies:
+  - '@parcel/watcher'
+  - lmdb
+  - msgpackr-extract
+  - protobufjs
+  - sharp
 
 onlyBuiltDependencies:
   - esbuild
+  - onnxruntime-node
   - tree-sitter-javascript
   - tree-sitter-typescript

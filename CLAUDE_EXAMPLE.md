@@ -2,7 +2,7 @@
 
 ## You are connected to a shared memory and RAG system via MCP
 
-You have 9 tools: `recall`, `remember`, `search_code`, `get_file_context`, `get_dependencies`, `project_overview`, `forget`, `consolidate`, `stats`.
+You have 11 tools: `recall`, `remember`, `search_code`, `get_symbol`, `find_usages`, `get_file_context`, `get_dependencies`, `project_overview`, `forget`, `consolidate`, `stats`.
 Other agents are connected to the same memory — you share a common project-scope.
 
 ---
@@ -54,12 +54,23 @@ Returns: directory tree (3 levels), entry points, language stats, indexed file c
 search_code(query="natural language description")
 search_code(query="router middleware auth", chunk_type="function")
 search_code(query="config validation", file_path="src/core", search_mode="semantic")
+search_code(query="embedOne", search_mode="lexical")          # literal term match only
+search_code(query="embed vector", name_pattern="embed")       # filter by symbol name
+search_code(query="parse tokens", rerank=true, top=5)         # cross-encoder reranking
 ```
 
 Search modes (`search_mode`):
-- `hybrid` (default) — RRF fusion of code + description vectors, best results in most cases
+- `hybrid` (default) — 3-way RRF (code vector + description vector + lexical leg), best in most cases
+- `lexical` — text index filter; only chunks where query terms literally appear in name or content
 - `code` — code vector only (exact structural matches)
 - `semantic` — description vector only (conceptual search when you don't know the name)
+
+**Symbol-level navigation via UUID:**
+Every `search_code` result includes an `id:` UUID. Use it to jump directly to the symbol or find its callers:
+```
+get_symbol("abc-123-...")          # retrieve full symbol — name, sig, content, file:line — no file I/O
+find_usages("abc-123-...", limit=20)  # find callers/references: [lexical] + [semantic], self-excluded
+```
 
 **Read a specific file or symbol after finding it via search_code:**
 ```
@@ -90,6 +101,8 @@ This MCP provides semantic search and memory.
 |------|-----|
 | Find code by meaning / concept | `search_code` (this MCP) |
 | Find a symbol by exact name | Serena `find_symbol` |
+| Retrieve symbol by UUID (fast, no I/O) | `get_symbol(uuid)` (this MCP) |
+| Find callers / references of a symbol | `find_usages(uuid)` (this MCP) |
 | Understand project structure | `project_overview` (this MCP) |
 | Read a specific file / symbol body | Serena `find_symbol(include_body=True)` or `get_file_context` |
 | Check what imports a file | `get_dependencies` (this MCP) |

@@ -8,7 +8,7 @@
 [![GitHub](https://img.shields.io/badge/github-13W%2Flocal--rag-blue)](https://github.com/13W/local-rag)
 
 Semantic memory and code intelligence as an MCP plugin for Claude Code agents.
-9 tools that give Claude persistent memory, semantic code search, and import graph traversal — all running locally.
+11 tools that give Claude persistent memory, semantic code search, import graph traversal, and symbol-level navigation — all running locally.
 
 ## What it does
 
@@ -16,7 +16,9 @@ Semantic memory and code intelligence as an MCP plugin for Claude Code agents.
 |------|-------------|
 | `recall(query)` | Semantic search across stored memories |
 | `remember(content)` | Store memory with type / scope / tags / importance |
-| `search_code(query)` | Hybrid RAG over indexed codebase |
+| `search_code(query)` | Hybrid RAG over indexed codebase (4 modes, reranker, name filter) |
+| `get_symbol(symbol_id)` | Retrieve a symbol by UUID — direct Qdrant lookup, no file I/O |
+| `find_usages(symbol_id)` | Find callers/references of a symbol (lexical + semantic, self-excluded) |
 | `get_file_context(file_path)` | Read file + list indexed symbols |
 | `get_dependencies(file_path)` | Import graph traversal (forward / reverse / transitive) |
 | `project_overview()` | 3-level directory tree, entry points, top imports |
@@ -294,6 +296,58 @@ Create `.memory.json` in your project root (auto-discovered if present):
 >
 > All other keys can also be passed as CLI flags (e.g. `--project-id foo`).
 > CLI flags override config file values. `include-paths` is config-file only.
+
+---
+
+## search_code — search modes and reranker
+
+`search_code` supports four modes via the `search_mode` parameter:
+
+| Mode | Description |
+|------|-------------|
+| `hybrid` (default) | 3-way RRF fusion: code vector + description vector + lexical text leg |
+| `code` | Code vector only — exact structural similarity |
+| `semantic` | Description vector only — conceptual search when you don't know the name |
+| `lexical` | Text index filter — only chunks where query terms literally appear in name or content |
+
+### Cross-encoder reranker
+
+After vector retrieval, an optional cross-encoder pass (`Xenova/bge-reranker-base`) re-scores and reorders results for higher precision:
+
+```
+search_code("embedOne", rerank=true, rerank_k=50, top=5)
+# Fetches 50 ANN candidates, scores all 50 with the cross-encoder, returns top 5
+```
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `rerank` | `false` | Enable cross-encoder reranking |
+| `rerank_k` | `50` | ANN candidates to fetch before reranking |
+| `top` | `limit` | Results to return after reranking |
+
+### Symbol name filter
+
+```
+search_code("embed vector", name_pattern="embed")
+# Only returns chunks whose name contains "embed" (prefix-tokenized index)
+```
+
+### Symbol-aware workflow
+
+Each `search_code` result includes an `id:` UUID field. Use it with the two symbol tools:
+
+```
+# 1. Find a symbol
+search_code("parse imports typescript")
+# → id:  abc-123-...  file: src/parser.ts  name: extractImports
+
+# 2. Read it directly (no file I/O)
+get_symbol("abc-123-...")
+
+# 3. Find what calls it
+find_usages("abc-123-...", limit=20)
+# Returns [lexical] hits (literal name match) + [semantic] hits (conceptual match), self-excluded
+```
 
 ---
 

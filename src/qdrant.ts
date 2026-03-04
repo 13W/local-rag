@@ -37,11 +37,19 @@ async function ensureCodeChunks(): Promise<void> {
     // Old single vector: it has a "size" key directly.
     const hasNamedVectors = vectors !== undefined && CODE_VECTORS.code in vectors;
     if (hasNamedVectors) {
-      // Ensure the imports keyword index exists on the existing collection (idempotent).
+      // Idempotent: ensure all indexes (keyword + text) exist on existing collection.
+      for (const field of ["imports"]) {
+        await qd.createPayloadIndex(col, { field_name: field, field_schema: "keyword", wait: true })
+          .catch(() => undefined);
+      }
+      // Migrate name index from word → prefix tokenizer (needed for name_pattern substring search).
+      // Delete first so the schema change takes effect; createPayloadIndex is a no-op if schema matches.
+      await qd.deletePayloadIndex(col, "name").catch(() => undefined);
       await qd.createPayloadIndex(col, {
-        field_name:   "imports",
-        field_schema: "keyword",
-        wait:         true,
+        field_name: "name", field_schema: { type: "text", tokenizer: "prefix", min_token_len: 2, lowercase: true }, wait: true,
+      }).catch(() => undefined);
+      await qd.createPayloadIndex(col, {
+        field_name: "content", field_schema: { type: "text", tokenizer: "word", min_token_len: 2, lowercase: true }, wait: true,
       }).catch(() => undefined);
       return;
     }
@@ -66,6 +74,13 @@ async function ensureCodeChunks(): Promise<void> {
       field_schema: "keyword",
       wait:         true,
     });
+  }
+
+  for (const [field, schema] of [
+    ["name",    { type: "text", tokenizer: "prefix", min_token_len: 2, lowercase: true }],
+    ["content", { type: "text", tokenizer: "word",   min_token_len: 2, lowercase: true }],
+  ] as const) {
+    await qd.createPayloadIndex(col, { field_name: field, field_schema: schema, wait: true });
   }
 
   process.stderr.write(`[qdrant] Created collection: ${col} (named vectors)\n`);

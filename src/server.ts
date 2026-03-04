@@ -21,6 +21,8 @@ import { statsTool }            from "./tools/stats.js";
 import { getFileContextTool }   from "./tools/get_file_context.js";
 import { getDependenciesTool }  from "./tools/get_dependencies.js";
 import { projectOverviewTool }  from "./tools/project_overview.js";
+import { getSymbolTool }        from "./tools/get_symbol.js";
+import { findUsagesTool }       from "./tools/find_usages.js";
 
 // ── Tool definitions (JSON Schema) ──────────────────────────────────────────
 
@@ -62,7 +64,7 @@ const TOOLS = [
   },
   {
     name: "search_code",
-    description: "Semantic search over the codebase (RAG).\n\nArgs:\n  query: What to find — natural language description\n  file_path: Filter by file path substring: \"src/auth\"\n  chunk_type: Filter: \"function\", \"class\", \"interface\", \"type_alias\", \"enum\"\n  limit: Number of results (1-20)\n  search_mode: \"hybrid\" (default, RRF fusion), \"code\" (code vector), \"semantic\" (description vector)",
+    description: "Semantic search over the codebase (RAG).\n\nArgs:\n  query: What to find — natural language description\n  file_path: Filter by file path substring: \"src/auth\"\n  chunk_type: Filter: \"function\", \"class\", \"interface\", \"type_alias\", \"enum\"\n  limit: Number of results (1-20)\n  search_mode: \"hybrid\" (default, RRF fusion), \"code\" (code vector), \"semantic\" (description vector)\n  rerank: Cross-encoder reranking for higher precision (default false)\n  rerank_k: ANN candidates to fetch before reranking (default 50)\n  top: Results to return after reranking (default: limit)",
     inputSchema: {
       type: "object" as const,
       properties: {
@@ -70,9 +72,36 @@ const TOOLS = [
         file_path:   { type: "string",  description: "File path substring filter: \"src/auth\"", default: "" },
         chunk_type:  { type: "string",  description: "Filter by symbol type (empty = all)", default: "", enum: ["", "function", "class", "interface", "type_alias", "enum"] },
         limit:       { type: "integer", description: "Max results (1–20)", default: 10 },
-        search_mode: { type: "string",  description: "Search algorithm", default: "hybrid", enum: ["hybrid", "code", "semantic"] },
+        search_mode: { type: "string",  description: "hybrid (default, RRF fusion), code (code vector), semantic (description vector), lexical (text index filter)", default: "hybrid", enum: ["hybrid", "code", "semantic", "lexical"] },
+        rerank:        { type: "boolean", description: "Cross-encoder reranking for higher precision", default: false },
+        rerank_k:      { type: "integer", description: "ANN candidates to fetch before reranking", default: 50 },
+        top:           { type: "integer", description: "Results to return after reranking (default: limit)", default: 10 },
+        name_pattern:  { type: "string",  description: "Filter by symbol name substring (e.g. \"use*\" for React hooks)", default: "" },
       },
       required: ["query"],
+    },
+  },
+  {
+    name: "get_symbol",
+    description: "Retrieve a symbol by its UUID from search_code results. Direct Qdrant lookup — no file I/O.\n\nArgs:\n  symbol_id: UUID of the symbol (from search_code `id:` field)",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        symbol_id: { type: "string", description: "UUID of the symbol from search_code results" },
+      },
+      required: ["symbol_id"],
+    },
+  },
+  {
+    name: "find_usages",
+    description: "Find symbols that reference or use a given symbol. Two-leg search: lexical (name/content match) + semantic (similar meaning). Merged by UUID, lexical hits first.\n\nArgs:\n  symbol_id: UUID of the symbol (from search_code or get_symbol)\n  limit: Max results (1–50, default 20)",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        symbol_id: { type: "string",  description: "UUID of the symbol (from search_code or get_symbol)" },
+        limit:     { type: "integer", description: "Max results (1–50)", default: 20 },
+      },
+      required: ["symbol_id"],
     },
   },
   {
@@ -185,11 +214,24 @@ export async function dispatchTool(name: string, a: Record<string, unknown>): Pr
   }
   if (name === "search_code") {
     return searchCodeTool({
-      query:       str(a["query"]),
-      file_path:   str(a["file_path"],   ""),
-      chunk_type:  str(a["chunk_type"],  ""),
-      limit:       int(a["limit"],       10),
-      search_mode: str(a["search_mode"], "hybrid"),
+      query:        str(a["query"]),
+      file_path:    str(a["file_path"],    ""),
+      chunk_type:   str(a["chunk_type"],   ""),
+      limit:        int(a["limit"],        10),
+      search_mode:  str(a["search_mode"],  "hybrid") as "hybrid" | "lexical" | "semantic" | "code",
+      rerank:       bool(a["rerank"],      false),
+      rerank_k:     int(a["rerank_k"],     50),
+      top:          int(a["top"],          10),
+      name_pattern: str(a["name_pattern"], ""),
+    });
+  }
+  if (name === "get_symbol") {
+    return getSymbolTool({ symbol_id: str(a["symbol_id"]) });
+  }
+  if (name === "find_usages") {
+    return findUsagesTool({
+      symbol_id: str(a["symbol_id"]),
+      limit:     int(a["limit"], 20),
     });
   }
   if (name === "forget") {
