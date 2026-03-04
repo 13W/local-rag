@@ -18,6 +18,8 @@ import { CODE_VECTORS, colName } from "../qdrant.js";
 const COLLECTION  = colName("code_chunks");
 const BATCH_SIZE  = 32;
 const DESC_CONCURRENCY = 5;
+// Bump this when parser extraction logic changes to force re-index of all files.
+const PARSER_VERSION = "2";
 const IGNORE_DIRS = new Set([
   "node_modules", ".git", "dist", "build", ".next", "coverage",
   "vendor", "charts", "testdata",
@@ -453,7 +455,7 @@ export class CodeIndexer {
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 function hashSource(source: string): string {
-  return createHash("sha256").update(source).digest("hex");
+  return createHash("sha256").update(PARSER_VERSION).update(source).digest("hex");
 }
 
 function buildEmbedContext(c: CodeChunk): string {
