@@ -441,7 +441,9 @@ export class CodeIndexer {
    */
   async repairNames(root: string): Promise<void> {
     const pathBase = cfg.projectRoot ? resolve(cfg.projectRoot) : root;
-    const affected: Array<{ id: string; filePath: string; startLine: number; chunkType: string }> = [];
+    const affected: Array<{
+      id: string; filePath: string; startLine: number; chunkType: string; content: string;
+    }> = [];
     let offset: string | number | undefined;
 
     // 1. Collect all empty-name chunks for this project
@@ -454,7 +456,7 @@ export class CodeIndexer {
           ],
         },
         limit:        500,
-        with_payload: ["file_path", "start_line", "chunk_type"],
+        with_payload: ["file_path", "start_line", "chunk_type", "content"],
         with_vector:  false,
         ...(offset !== undefined && { offset }),
       }).catch((): { points: []; next_page_offset: undefined } => ({ points: [], next_page_offset: undefined }));
@@ -466,6 +468,7 @@ export class CodeIndexer {
           filePath:  String(pl["file_path"]  ?? ""),
           startLine: Number(pl["start_line"] ?? 0),
           chunkType: String(pl["chunk_type"] ?? ""),
+          content:   String(pl["content"]    ?? ""),
         });
       }
       const next = (result as { next_page_offset?: string | number | null }).next_page_offset;
@@ -501,13 +504,20 @@ export class CodeIndexer {
       }
 
       const chunks = await parseFile(relPath, source).catch(() => [] as CodeChunk[]);
-      const chunkMap = new Map<string, string>();
+
+      // Primary key: chunkType:startLine (exact match)
+      // Fallback key: content (handles line-shift when file modified since indexing)
+      const chunkMap   = new Map<string, string>(); // chunkType:startLine → name
+      const contentMap = new Map<string, string>(); // content → name
       for (const c of chunks) {
-        if (c.name) chunkMap.set(`${c.chunkType}:${c.startLine}`, c.name);
+        if (c.name) {
+          chunkMap.set(`${c.chunkType}:${c.startLine}`, c.name);
+          if (c.content) contentMap.set(c.content, c.name);
+        }
       }
 
       for (const p of points) {
-        const name = chunkMap.get(`${p.chunkType}:${p.startLine}`);
+        const name = chunkMap.get(`${p.chunkType}:${p.startLine}`) ?? contentMap.get(p.content);
         if (!name) continue;
         await this.qd.setPayload(COLLECTION, { payload: { name }, points: [p.id], wait: true } as never);
         fixed++;
@@ -515,6 +525,13 @@ export class CodeIndexer {
     }
 
     process.stderr.write(`[repair] Done: ${fixed}/${affected.length} chunks repaired\n`);
+    const unresolved = affected.length - fixed;
+    if (unresolved > 0) {
+      process.stderr.write(
+        `[repair] ${unresolved} chunks could not be matched — ` +
+        `run 'local-rag index <root>' to fully re-index those files.\n`,
+      );
+    }
   }
 
   async clear(): Promise<void> {
