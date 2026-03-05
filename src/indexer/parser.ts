@@ -72,7 +72,20 @@ const TS_EXTRACT_NODES = new Set([
   "variable_declarator",
 ]);
 
+function firstBindingFromPattern(node: SyntaxNode): string {
+  for (const child of node.children) {
+    if (child.type === "identifier" || child.type === "shorthand_property_identifier_pattern")
+      return child.text;
+    if (child.type === "object_pattern" || child.type === "array_pattern") {
+      const n = firstBindingFromPattern(child);
+      if (n) return n;
+    }
+  }
+  return "";
+}
+
 function extractNameIdentifier(node: SyntaxNode): string {
+  let hasDefault = false;
   for (const child of node.children) {
     if (
       child.type === "identifier" ||
@@ -82,8 +95,12 @@ function extractNameIdentifier(node: SyntaxNode): string {
       return child.text;
     }
     if (TS_EXTRACT_NODES.has(child.type)) return extractNameIdentifier(child);
+    // Destructuring LHS (object/array pattern) — grab first binding; don't fall through to RHS
+    if (child.type === "object_pattern" || child.type === "array_pattern")
+      return firstBindingFromPattern(child);
+    if (child.type === "default") hasDefault = true;
   }
-  return "";
+  return hasDefault ? "default" : "";
 }
 
 function extractNameField(node: SyntaxNode): string {
