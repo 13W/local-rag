@@ -65,8 +65,10 @@ const MIN_CHUNK_CHARS = 50;
 // ── name extractors ───────────────────────────────────────────────────────────
 
 const TS_EXTRACT_NODES = new Set([
-  "function_declaration", "arrow_function", "method_definition",
-  "function_signature", "class_declaration", "abstract_class_declaration",
+  "function_declaration", "function_expression",
+  "generator_function_declaration", "generator_function",
+  "arrow_function", "method_definition",
+  "function_signature", "class_declaration", "abstract_class_declaration", "class_expression",
   "interface_declaration", "type_alias_declaration", "enum_declaration",
   "export_statement", "lexical_declaration",
   "variable_declarator",
