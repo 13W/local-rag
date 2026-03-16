@@ -184,9 +184,22 @@ const TOOL_MAP = new Map(TOOLS.map(t => [t.name, t]));
 // ── Argument helpers ─────────────────────────────────────────────────────────
 
 function str(v: unknown, def = ""): string    { return typeof v === "string"  ? v : def; }
-function num(v: unknown, def: number): number { return typeof v === "number"  ? v : def; }
-function int(v: unknown, def: number): number { return typeof v === "number"  ? Math.trunc(v) : def; }
-function bool(v: unknown, def: boolean): boolean { return typeof v === "boolean" ? v : def; }
+function num(v: unknown, def: number): number {
+  if (typeof v === "number") return v;
+  if (typeof v === "string" && v !== "") { const n = Number(v); if (!Number.isNaN(n)) return n; }
+  return def;
+}
+function int(v: unknown, def: number): number {
+  if (typeof v === "number") return Math.trunc(v);
+  if (typeof v === "string" && v !== "") { const n = Number(v); if (!Number.isNaN(n)) return Math.trunc(n); }
+  return def;
+}
+function bool(v: unknown, def: boolean): boolean {
+  if (typeof v === "boolean") return v;
+  if (v === "true") return true;
+  if (v === "false") return false;
+  return def;
+}
 
 // ── Tool dispatch ─────────────────────────────────────────────────────────────
 

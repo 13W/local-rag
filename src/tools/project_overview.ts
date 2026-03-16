@@ -1,4 +1,4 @@
-import { readdirSync, statSync, readFileSync, existsSync } from "node:fs";
+import { readdirSync, lstatSync, readFileSync, existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { cfg } from "../config.js";
 import { qd, colName } from "../qdrant.js";
@@ -22,7 +22,8 @@ function buildDirTree(absDir: string, depth: number, maxDepth: number): DirTree[
   for (const item of items) {
     if (item.startsWith(".")) continue;
     const abs = join(absDir, item);
-    const st  = statSync(abs);
+    const st  = lstatSync(abs, { throwIfNoEntry: false });
+    if (!st) continue;
     if (st.isDirectory()) {
       if (IGNORE_DIRS.has(item)) continue;
       entries.push({
@@ -110,7 +111,8 @@ async function getLanguageStats(root: string): Promise<Record<string, number>> {
     for (const item of readdirSync(dir)) {
       if (item.startsWith(".")) continue;
       const abs = join(dir, item);
-      const st  = statSync(abs);
+      const st  = lstatSync(abs, { throwIfNoEntry: false });
+      if (!st) continue;
       if (st.isDirectory()) {
         if (!IGNORE_DIRS.has(item)) walk(abs);
       } else {

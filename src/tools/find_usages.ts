@@ -5,6 +5,8 @@ import type { Schemas } from "@qdrant/js-client-rest";
 
 type ScoredPoint = Schemas["ScoredPoint"];
 
+type Leg = "lexical" | "import-graph" | "semantic";
+
 export interface FindUsagesArgs { symbol_id: string; limit: number; }
 
 export async function findUsagesTool(a: FindUsagesArgs): Promise<string> {
@@ -23,42 +25,78 @@ export async function findUsagesTool(a: FindUsagesArgs): Promise<string> {
   if (!name) return `Symbol '${a.symbol_id}' has no name.`;
 
   const projectFilter = { must: [{ key: "project_id", match: { value: cfg.projectId } }] };
-  const textCondition = {
-    should: [
-      { key: "name",    match: { text: name } },
-      { key: "content", match: { text: name } },
+
+  // Lexical: only search content — searching `name` field finds same-named
+  // symbols in other files (definitions), not actual usages.
+  const lexFilter = {
+    must: [
+      ...projectFilter.must,
+      { should: [{ key: "content", match: { text: name } }] },
     ],
   };
-  const lexFilter = { must: [...projectFilter.must, textCondition] };
 
   const embedding = await embedOne(signature);
 
-  // 2. Lexical + semantic in parallel
-  const [lexHits, semHits] = await Promise.all([
+  // Three legs in parallel: lexical + import-graph + semantic
+  const [lexHits, semHits, importGraphHits] = await Promise.all([
+    // Lexical: chunks whose content mentions the symbol name
     qd.search(colName("code_chunks"), {
       vector: { name: CODE_VECTORS.code, vector: embedding },
       filter: lexFilter, limit, with_payload: true,
     }).catch((): ScoredPoint[] => []),
+
+    // Semantic: conceptual similarity
     qd.search(colName("code_chunks"), {
       vector: { name: CODE_VECTORS.description, vector: embedding },
       filter: projectFilter, limit, with_payload: true, score_threshold: 0.45,
     }).catch((): ScoredPoint[] => []),
+
+    // Import-graph: chunks from files that import the target file.
+    // Catches default exports and re-exports regardless of local alias.
+    filePath
+      ? qd.search(colName("code_chunks"), {
+          vector: { name: CODE_VECTORS.code, vector: embedding },
+          filter: {
+            must: [
+              { key: "project_id", match: { value: cfg.projectId } },
+              { key: "imports",    match: { value: filePath      } },
+            ],
+          },
+          limit, with_payload: true, score_threshold: 0.25,
+        }).catch((): ScoredPoint[] => [])
+      : Promise.resolve([] as ScoredPoint[]),
   ]);
 
-  // 3. Merge (lexical first), dedup, exclude self
+  // Merge: lexical → import-graph → semantic; dedup; exclude self.
+  // Import-graph: cap at 2 chunks per importing file to avoid flooding.
   const seen = new Set<string | number>([a.symbol_id]);
-  const merged: ScoredPoint[] = [];
-  for (const hit of [...lexHits, ...semHits]) {
-    if (!seen.has(hit.id)) { seen.add(hit.id); merged.push(hit); }
+  const merged: Array<{ hit: ScoredPoint; leg: Leg }> = [];
+
+  for (const hit of lexHits) {
+    if (!seen.has(hit.id)) { seen.add(hit.id); merged.push({ hit, leg: "lexical" }); }
   }
-  const lexIds = new Set(lexHits.map(h => h.id));
+
+  const importFileCount = new Map<string, number>();
+  for (const hit of importGraphHits) {
+    if (seen.has(hit.id)) continue;
+    const hp = (hit.payload ?? {}) as Record<string, unknown>;
+    const fp = String(hp["file_path"] ?? "");
+    const count = importFileCount.get(fp) ?? 0;
+    if (count >= 2) continue;
+    importFileCount.set(fp, count + 1);
+    seen.add(hit.id);
+    merged.push({ hit, leg: "import-graph" });
+  }
+
+  for (const hit of semHits) {
+    if (!seen.has(hit.id)) { seen.add(hit.id); merged.push({ hit, leg: "semantic" }); }
+  }
 
   if (merged.length === 0) return `No usages found for '${name}' (${filePath}).`;
 
   const lines: string[] = [`Usages of '${name}' (${filePath}): ${merged.length} result(s)\n`];
-  for (const hit of merged.slice(0, limit)) {
+  for (const { hit, leg } of merged.slice(0, limit)) {
     const hp  = (hit.payload ?? {}) as Record<string, unknown>;
-    const leg = lexIds.has(hit.id) ? "lexical" : "semantic";
     lines.push(`--- [${leg}] ${hp["chunk_type"] ?? "?"} ---`);
     lines.push(`id:   ${hit.id}`);
     lines.push(`file: ${hp["file_path"] ?? "?"}:${hp["start_line"] ?? "?"}-${hp["end_line"] ?? "?"}`);

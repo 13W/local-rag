@@ -31,7 +31,7 @@ export class CodeIndexer {
   private _indexInFlight = new Map<string, Promise<[number, number]>>();
 
   constructor(opts: { generateDescriptions?: boolean } = {}) {
-    this.qd       = new QdrantClient({ url: cfg.qdrantUrl });
+    this.qd       = new QdrantClient({ url: cfg.qdrantUrl, timeout: 30_000 });
     this.genDescs = opts.generateDescriptions ?? false;
   }
 
@@ -191,12 +191,9 @@ export class CodeIndexer {
       with_payload: ["description", "is_parent", "parent_id"],
       with_vector:  false,
     });
-    const regular = result.points.filter((p) => {
-      const pl = p.payload ?? {};
-      return !pl["is_parent"] && !pl["parent_id"];
-    });
-    return regular.length > 0 &&
-      regular.some((p) => typeof (p.payload ?? {})["description"] !== "string");
+    const nonParent = result.points.filter((p) => !(p.payload ?? {})["is_parent"]);
+    return nonParent.length > 0 &&
+      nonParent.some((p) => typeof (p.payload ?? {})["description"] !== "string");
   }
 
   /** Generate descriptions for a batch of chunks (bounded concurrency). */
@@ -317,9 +314,9 @@ export class CodeIndexer {
 
     // ── LLM Descriptions ─────────────────────────────────────────────────────
     // Parent chunks always get descriptions (they hold the summary).
-    // For regular/child chunks, only when flag is enabled.
+    // When genDescs is enabled, all chunks (including child) get descriptions.
     const needsDesc = chunks.map((c) =>
-      c.chunkRole === "parent" || (this.genDescs && c.chunkRole !== "child")
+      c.chunkRole === "parent" || this.genDescs
     );
 
     const descTexts: (string | null)[] = new Array(chunks.length).fill(null);

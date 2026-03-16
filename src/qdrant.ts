@@ -1,7 +1,7 @@
 import { QdrantClient } from "@qdrant/js-client-rest";
 import { cfg } from "./config.js";
 
-export const qd = new QdrantClient({ url: cfg.qdrantUrl });
+export const qd = new QdrantClient({ url: cfg.qdrantUrl, timeout: 30_000 });
 
 export const COLLECTIONS = [
   "memory_episodic",
