@@ -135,3 +135,8 @@ export const cfg = Object.freeze({
 process.stderr.write(
   `[config] projectId=${cfg.projectId} projectRoot=${cfg.projectRoot || "(cwd)"} includePaths=${cfg.includePaths.length}\n`
 );
+
+/** Mutable current branch — updated by the watcher on branch switch. */
+let _currentBranch = "default";
+export function setCurrentBranch(branch: string): void { _currentBranch = branch; }
+export function getCurrentBranchCached(): string { return _currentBranch; }

@@ -1,6 +1,6 @@
 import { qd, CODE_VECTORS, colName } from "../qdrant.js";
 import { embedOne } from "../embedder.js";
-import { cfg } from "../config.js";
+import { cfg, getCurrentBranchCached } from "../config.js";
 import { rerank as rerankHits } from "../reranker.js";
 import type { Schemas } from "@qdrant/js-client-rest";
 
@@ -14,6 +14,7 @@ export interface SearchCodeArgs {
   rerank_k:     number;  // ANN candidates before reranking, default 50
   top:          number;  // results to return after reranking, default = limit
   name_pattern: string;  // filter by symbol name substring, default ""
+  branch?:      string;  // override branch filter, default = currentBranch
 }
 
 type ScoredPoint = Schemas["ScoredPoint"];
@@ -21,8 +22,10 @@ type ScoredPoint = Schemas["ScoredPoint"];
 export async function searchCodeTool(a: SearchCodeArgs): Promise<string> {
   const embedding = await embedOne(a.query);
 
+  const branchFilter = a.branch || getCurrentBranchCached();
   const must: Array<{ key: string; match: { value: string } | { text: string } }> = [
     { key: "project_id", match: { value: cfg.projectId } },
+    { key: "branches",   match: { value: branchFilter  } },
   ];
   // match: { text } without a full-text index performs exact substring matching in Qdrant
   if (a.file_path)    must.push({ key: "file_path",  match: { text:  a.file_path    } });

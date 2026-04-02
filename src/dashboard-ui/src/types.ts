@@ -45,6 +45,8 @@ export interface ServerInfo {
   collectionPrefix:     string;
   embedProvider:        string;
   embedModel:           string;
+  llmProvider:          string;
+  llmModel:             string;
   generateDescriptions: boolean;
 }
 

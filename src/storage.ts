@@ -4,6 +4,7 @@
  */
 
 import { qd, colName } from "./qdrant.js";
+import { getCurrentBranchCached } from "./config.js";
 
 const MEMORY_COLLECTIONS = [
   "memory_episodic",
@@ -164,6 +165,7 @@ export async function getDeps(projectId: string, filePath: string): Promise<stri
         must: [
           { key: "project_id", match: { value: projectId } },
           { key: "file_path",  match: { value: filePath  } },
+          { key: "branches",   match: { value: getCurrentBranchCached() } },
         ],
       },
       limit:        1,
@@ -191,6 +193,7 @@ export async function getReverseDeps(projectId: string, filePath: string): Promi
           must: [
             { key: "project_id", match: { value: projectId } },
             { key: "imports",    match: { value: filePath  } },
+            { key: "branches",   match: { value: getCurrentBranchCached() } },
           ],
         },
         limit:        500,
@@ -289,7 +292,10 @@ export async function topFilesByRevDeps(
   while (true) {
     const result = await qd
       .scroll(colName("code_chunks"), {
-        filter: { must: [{ key: "project_id", match: { value: projectId } }] },
+        filter: { must: [
+          { key: "project_id", match: { value: projectId } },
+          { key: "branches",   match: { value: getCurrentBranchCached() } },
+        ] },
         limit:        500,
         with_payload: ["imports"],
         with_vector:  false,

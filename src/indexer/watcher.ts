@@ -4,7 +4,9 @@ import { resolve, relative, join } from "node:path";
 import type { CodeIndexer } from "./indexer.js";
 import { GitignoreFilter } from "./gitignore.js";
 import { cfg } from "../config.js";
-import { recordIndex } from "../dashboard.js";
+import { recordIndex, broadcastBranchSwitch } from "../dashboard.js";
+import { getCurrentBranch, getGitHeadPath, saveGitState } from "./git.js";
+import { setCurrentBranch } from "../config.js";
 
 // Directories that must never receive inotify watches (mirrors IGNORE_DIRS in indexer.ts)
 const WATCH_IGNORED = [
@@ -59,7 +61,7 @@ export function startWatcher(
     if (existsSync(absPath)) {
       const t0 = Date.now();
       indexer
-        .indexFile(absPath, absRoot)
+        .indexFileIncremental(absPath, absRoot)
         .then(([n, ms]) => {
           if (n === 0) return;
           process.stderr.write(`[watcher] re-indexed ${relPath}: ${n} chunks\n`);
@@ -73,9 +75,9 @@ export function startWatcher(
     } else {
       const t1 = Date.now();
       indexer
-        .deleteFile(relPath)
+        .untagFile(relPath, indexer.branch)
         .then(() => {
-          process.stderr.write(`[watcher] deleted ${relPath}\n`);
+          process.stderr.write(`[watcher] untagged ${relPath}\n`);
           recordIndex(relPath, 0, Date.now() - t1, true);
         })
         .catch((err: unknown) => {
@@ -89,4 +91,46 @@ export function startWatcher(
   watcher.once("ready", () => onReady?.());
 
   process.stderr.write(`[watcher] Watching ${absRoot}\n`);
+
+  // ── Branch switch detection via .git/HEAD ──────────────────────────────────
+  const gitHeadPath = getGitHeadPath(root);
+  if (gitHeadPath) {
+    let switchInProgress = false;
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+    chokidar
+      .watch(gitHeadPath, {
+        persistent: false,
+        usePolling: false,
+        awaitWriteFinish: { stabilityThreshold: 200, pollInterval: 50 },
+      })
+      .on("change", () => {
+        if (debounceTimer) clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(async () => {
+          if (switchInProgress) return;
+          const newBranch = getCurrentBranch(root);
+          if (newBranch === indexer.branch) return;
+
+          switchInProgress = true;
+          const oldBranch = indexer.branch;
+          process.stderr.write(`[watcher] Branch switch detected: ${oldBranch} → ${newBranch}\n`);
+
+          try {
+            await indexer.switchBranch(root, oldBranch, newBranch);
+            setCurrentBranch(newBranch);
+            broadcastBranchSwitch(newBranch);
+            await saveGitState({
+              lastBranch: newBranch,
+              lastIndexTimestamp: Date.now(),
+            }).catch(() => undefined);
+          } catch (err: unknown) {
+            process.stderr.write(`[watcher] Branch switch error: ${String(err)}\n`);
+          } finally {
+            switchInProgress = false;
+          }
+        }, 500);
+      });
+
+    process.stderr.write(`[watcher] Watching .git/HEAD for branch switches\n`);
+  }
 }

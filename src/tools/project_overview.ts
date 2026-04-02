@@ -1,6 +1,6 @@
 import { readdirSync, lstatSync, readFileSync, existsSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { cfg } from "../config.js";
+import { cfg, getCurrentBranchCached } from "../config.js";
 import { qd, colName } from "../qdrant.js";
 import { topFilesByRevDeps } from "../storage.js";
 
@@ -134,7 +134,10 @@ async function getAllIndexedFilePaths(): Promise<string[]> {
   while (true) {
     const result = await qd
       .scroll(colName("code_chunks"), {
-        filter: { must: [{ key: "project_id", match: { value: cfg.projectId } }] },
+        filter: { must: [
+          { key: "project_id", match: { value: cfg.projectId } },
+          { key: "branches",   match: { value: getCurrentBranchCached() } },
+        ] },
         limit:        500,
         with_payload: ["file_path"],
         with_vector:  false,

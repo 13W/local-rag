@@ -105,7 +105,9 @@
     @if (tab() === 'dashboard') {
       <div class="h-full flex flex-col min-h-0">
 
-        <app-server-info [info]="init.serverInfo" />
+        @if (sse.serverInfo(); as si) {
+          <app-server-info [info]="si" />
+        }
 
         <h2 class="text-[0.9rem] font-semibold uppercase tracking-[0.07em] text-(--color-indigo)
                     mt-4 mb-1.5 pb-1 border-b border-(--color-border) shrink-0">Tool Stats</h2>

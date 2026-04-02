@@ -29,6 +29,7 @@ export interface CodeChunkPayload {
   children_ids?:  string[];
   is_parent?:     boolean;
   imports?:       string[];
+  branches?:      string[];
 }
 
 export interface StoreMemoryParams {

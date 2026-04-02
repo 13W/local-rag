@@ -1,6 +1,6 @@
 import { qd, colName, CODE_VECTORS } from "../qdrant.js";
 import { embedOne } from "../embedder.js";
-import { cfg } from "../config.js";
+import { cfg, getCurrentBranchCached } from "../config.js";
 import type { Schemas } from "@qdrant/js-client-rest";
 
 type ScoredPoint = Schemas["ScoredPoint"];
@@ -24,7 +24,10 @@ export async function findUsagesTool(a: FindUsagesArgs): Promise<string> {
   const filePath  = String(p["file_path"] ?? "");
   if (!name) return `Symbol '${a.symbol_id}' has no name.`;
 
-  const projectFilter = { must: [{ key: "project_id", match: { value: cfg.projectId } }] };
+  const projectFilter = { must: [
+    { key: "project_id", match: { value: cfg.projectId } },
+    { key: "branches",   match: { value: getCurrentBranchCached() } },
+  ] };
 
   // Lexical: only search content — searching `name` field finds same-named
   // symbols in other files (definitions), not actual usages.
@@ -59,6 +62,7 @@ export async function findUsagesTool(a: FindUsagesArgs): Promise<string> {
           filter: {
             must: [
               { key: "project_id", match: { value: cfg.projectId } },
+              { key: "branches",   match: { value: getCurrentBranchCached() } },
               { key: "imports",    match: { value: filePath      } },
             ],
           },

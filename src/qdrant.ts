@@ -38,7 +38,7 @@ async function ensureCodeChunks(): Promise<void> {
     const hasNamedVectors = vectors !== undefined && CODE_VECTORS.code in vectors;
     if (hasNamedVectors) {
       // Idempotent: ensure all indexes (keyword + text) exist on existing collection.
-      for (const field of ["imports"]) {
+      for (const field of ["imports", "branches"]) {
         await qd.createPayloadIndex(col, { field_name: field, field_schema: "keyword", wait: true })
           .catch(() => undefined);
       }
@@ -68,7 +68,7 @@ async function ensureCodeChunks(): Promise<void> {
     },
   });
 
-  for (const field of ["file_path", "chunk_type", "language", "project_id", "parent_id", "imports"]) {
+  for (const field of ["file_path", "chunk_type", "language", "project_id", "parent_id", "imports", "branches"]) {
     await qd.createPayloadIndex(col, {
       field_name:   field,
       field_schema: "keyword",

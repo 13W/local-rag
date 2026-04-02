@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join, relative, resolve, extname, basename } from "node:path";
 import { createHash } from "node:crypto";
 import { cfg } from "../config.js";
@@ -13,6 +13,11 @@ import {
 } from "../storage.js";
 import type { CodeChunk } from "../types.js";
 import { qd, CODE_VECTORS, colName } from "../qdrant.js";
+import {
+  loadManifest,
+  saveManifest,
+  type FileManifest,
+} from "./git.js";
 
 const COLLECTION  = colName("code_chunks");
 const BATCH_SIZE  = 32;
@@ -27,10 +32,15 @@ export class CodeIndexer {
   private resolver: ImportResolver    | null = null;
   private ignFilter: GitignoreFilter  | null = null;
   private _indexInFlight = new Map<string, Promise<[number, number]>>();
+  private _branch = "default";
 
-  constructor(opts: { generateDescriptions?: boolean } = {}) {
+  constructor(opts: { generateDescriptions?: boolean; branch?: string } = {}) {
     this.genDescs = opts.generateDescriptions ?? false;
+    if (opts.branch) this._branch = opts.branch;
   }
+
+  get branch(): string { return this._branch; }
+  set branch(v: string) { this._branch = v; }
 
   async ensureCollection(): Promise<void> {
     const { collections } = await qd.getCollections();
@@ -42,8 +52,10 @@ export class CodeIndexer {
       const hasNamedVectors = vectors !== undefined && CODE_VECTORS.code in vectors;
       if (hasNamedVectors) {
         // Idempotent: ensure all indexes exist (mirrors ensureCodeChunks in qdrant.ts).
-        await qd.createPayloadIndex(COLLECTION, { field_name: "imports", field_schema: "keyword", wait: true })
-          .catch(() => undefined);
+        for (const f of ["imports", "branches"]) {
+          await qd.createPayloadIndex(COLLECTION, { field_name: f, field_schema: "keyword", wait: true })
+            .catch(() => undefined);
+        }
         // Migrate name index from word → prefix tokenizer so name_pattern substring search works.
         await qd.deletePayloadIndex(COLLECTION, "name").catch(() => undefined);
         await qd.createPayloadIndex(COLLECTION, {
@@ -151,6 +163,233 @@ export class CodeIndexer {
         ],
       },
     });
+  }
+
+  /**
+   * Remove only the current branch tag from chunks of a file.
+   * Chunks that still belong to other branches are preserved.
+   */
+  async untagFile(relPath: string, branch: string): Promise<void> {
+    let offset: string | number | undefined;
+    while (true) {
+      const result = await qd.scroll(COLLECTION, {
+        filter: {
+          must: [
+            { key: "file_path",  match: { value: relPath       } },
+            { key: "project_id", match: { value: cfg.projectId } },
+            { key: "branches",   match: { value: branch        } },
+          ],
+        },
+        limit:        500,
+        with_payload: ["branches"],
+        with_vector:  false,
+        ...(offset !== undefined && { offset }),
+      }).catch((): { points: []; next_page_offset: undefined } => ({ points: [], next_page_offset: undefined }));
+
+      for (const p of result.points) {
+        const old = ((p.payload ?? {}) as Record<string, unknown>)["branches"] as string[] | undefined ?? [];
+        const updated = old.filter((b) => b !== branch);
+        if (updated.length === 0) {
+          // No branches left — delete the chunk
+          await qd.delete(COLLECTION, { points: [String(p.id)] });
+        } else {
+          await qd.setPayload(COLLECTION, {
+            payload: { branches: updated },
+            points: [String(p.id)],
+            wait: true,
+          } as never);
+        }
+      }
+
+      const next = (result as { next_page_offset?: string | number | null }).next_page_offset;
+      if (!next) break;
+      offset = next;
+    }
+  }
+
+  /**
+   * Incremental file indexing: reuses existing chunks when file_hash matches.
+   * Returns [chunks_processed, elapsed_ms].
+   */
+  async indexFileIncremental(absPath: string, root: string, branch?: string): Promise<[number, number]> {
+    const t0 = Date.now();
+    const br = branch ?? this._branch;
+    const pathBase = cfg.projectRoot ? resolve(cfg.projectRoot) : root;
+    const relPath  = relative(pathBase, absPath).replace(/\\/g, "/");
+    const source   = readFileSync(absPath, "utf8");
+    const newHash  = hashSource(source);
+
+    // Check if chunks with the same file_hash already exist (from any branch)
+    const existing = await qd.scroll(COLLECTION, {
+      filter: {
+        must: [
+          { key: "file_path",  match: { value: relPath       } },
+          { key: "file_hash",  match: { value: newHash        } },
+          { key: "project_id", match: { value: cfg.projectId } },
+        ],
+      },
+      limit:        1,
+      with_payload: ["branches"],
+      with_vector:  false,
+    }).catch((): { points: [] } => ({ points: [] }));
+
+    if (existing.points.length > 0) {
+      // Chunks exist with this content — check if branch is already tagged
+      const branches = ((existing.points[0]!.payload ?? {}) as Record<string, unknown>)["branches"] as string[] | undefined ?? [];
+      if (branches.includes(br)) {
+        return [0, Date.now() - t0]; // Already tagged for this branch
+      }
+
+      // Tag all chunks of this file+hash with the new branch
+      await this._addBranchTag(relPath, newHash, br);
+      return [0, Date.now() - t0];
+    }
+
+    // No existing chunks with this hash — untag old version on this branch, then full index
+    await this.untagFile(relPath, br);
+
+    // Use the standard _indexFileImpl which now sets branches: [this._branch]
+    const oldBranch = this._branch;
+    this._branch = br;
+    const result = await this._indexFileImpl(absPath, root);
+    this._branch = oldBranch;
+    return result;
+  }
+
+  /** Add a branch tag to all chunks of file_path + file_hash. */
+  private async _addBranchTag(relPath: string, fileHash: string, branch: string): Promise<void> {
+    let offset: string | number | undefined;
+    while (true) {
+      const result = await qd.scroll(COLLECTION, {
+        filter: {
+          must: [
+            { key: "file_path",  match: { value: relPath       } },
+            { key: "file_hash",  match: { value: fileHash       } },
+            { key: "project_id", match: { value: cfg.projectId } },
+          ],
+        },
+        limit:        500,
+        with_payload: ["branches"],
+        with_vector:  false,
+        ...(offset !== undefined && { offset }),
+      }).catch((): { points: []; next_page_offset: undefined } => ({ points: [], next_page_offset: undefined }));
+
+      for (const p of result.points) {
+        const old = ((p.payload ?? {}) as Record<string, unknown>)["branches"] as string[] | undefined ?? [];
+        if (!old.includes(branch)) {
+          await qd.setPayload(COLLECTION, {
+            payload: { branches: [...old, branch] },
+            points: [String(p.id)],
+            wait: true,
+          } as never);
+        }
+      }
+
+      const next = (result as { next_page_offset?: string | number | null }).next_page_offset;
+      if (!next) break;
+      offset = next;
+    }
+  }
+
+  /**
+   * Process only a diff set of changed files.
+   */
+  async indexDiff(
+    changedFiles: Array<{ path: string; status: "added" | "modified" | "deleted" }>,
+    root: string,
+    branch?: string,
+  ): Promise<number> {
+    const br = branch ?? this._branch;
+    const pathBase = cfg.projectRoot ? resolve(cfg.projectRoot) : root;
+    let totalChunks = 0;
+
+    for (const file of changedFiles) {
+      const absPath = join(pathBase, file.path);
+
+      if (file.status === "deleted") {
+        await this.untagFile(file.path, br);
+        continue;
+      }
+
+      if (!existsSync(absPath)) {
+        await this.untagFile(file.path, br);
+        continue;
+      }
+
+      try {
+        const [n] = await this.indexFileIncremental(absPath, root, br);
+        totalChunks += n;
+      } catch (err: unknown) {
+        process.stderr.write(`[indexer] diff: ${file.path}: ${String(err)}\n`);
+      }
+    }
+
+    return totalChunks;
+  }
+
+  /**
+   * Handle branch switch: diff manifests, incrementally reindex only changed files.
+   */
+  async switchBranch(root: string, oldBranch: string, newBranch: string): Promise<void> {
+    const t0 = Date.now();
+    const pathBase = cfg.projectRoot ? resolve(cfg.projectRoot) : root;
+    this._branch = newBranch;
+
+    // Initialize resolver if not done yet
+    if (!this.resolver) {
+      this.resolver = new ImportResolver({ root: pathBase });
+    }
+
+    // Save manifest for old branch before switching
+    const oldManifest = this._buildDiskManifest(root);
+    await saveManifest(oldBranch, oldManifest).catch(() => undefined);
+
+    // Load stored manifest for new branch (if any)
+    const storedManifest = await loadManifest(newBranch);
+
+    // Build current disk manifest (files as they are NOW on disk = new branch)
+    const diskManifest = this._buildDiskManifest(root);
+
+    if (storedManifest) {
+      // Diff stored manifest vs disk
+      const diff = diffManifests(storedManifest, diskManifest);
+      if (diff.length > 0) {
+        process.stderr.write(`[indexer] Branch switch ${oldBranch} → ${newBranch}: ${diff.length} files changed\n`);
+        await this.indexDiff(diff, root, newBranch);
+      } else {
+        process.stderr.write(`[indexer] Branch switch ${oldBranch} → ${newBranch}: no changes\n`);
+      }
+    } else {
+      // No stored manifest — need to process all files, but file_hash dedup will help
+      process.stderr.write(`[indexer] Branch switch to new branch "${newBranch}": scanning all files\n`);
+      const files = this.collectFiles(resolve(root));
+      for (const absPath of files) {
+        await this.indexFileIncremental(absPath, root, newBranch).catch((err: unknown) => {
+          process.stderr.write(`[indexer] ${absPath}: ${String(err)}\n`);
+        });
+      }
+    }
+
+    // Save updated manifest for new branch
+    await saveManifest(newBranch, diskManifest).catch(() => undefined);
+    await invalidateProjectOverview(cfg.projectId).catch(() => undefined);
+
+    process.stderr.write(`[indexer] Branch switch complete in ${Date.now() - t0}ms\n`);
+  }
+
+  /** Build a manifest from files currently on disk. */
+  _buildDiskManifest(root: string): FileManifest {
+    const pathBase = cfg.projectRoot ? resolve(cfg.projectRoot) : root;
+    const files = this.collectFiles(resolve(root));
+    const manifest: FileManifest = {};
+    for (const absPath of files) {
+      const relPath = relative(pathBase, absPath).replace(/\\/g, "/");
+      try {
+        const source = readFileSync(absPath, "utf8");
+        manifest[relPath] = hashSource(source);
+      } catch { /* skip unreadable files */ }
+    }
+    return manifest;
   }
 
   private async getFileHash(relPath: string): Promise<string | null> {
@@ -393,6 +632,7 @@ export class CodeIndexer {
       if (parentId)      payload["parent_id"]     = parentId;
       if (childrenIds)   payload["children_ids"]  = childrenIds;
       if (resolvedImports.length > 0) payload["imports"] = resolvedImports;
+      payload["branches"] = [this._branch];
 
       points.push({ id, vector, payload });
     }
@@ -575,6 +815,153 @@ export class CodeIndexer {
       process.stderr.write(`[repair] ${unfound} chunks could not be matched — run 'local-rag index <root>' to fully re-index those files.\n`);
   }
 
+  /**
+   * One-time migration: add branches: [branch] to all existing chunks that lack the field.
+   */
+  async migrateBranches(branch: string, root: string): Promise<void> {
+    // Build disk manifest so we only tag chunks whose files actually exist on this branch
+    const diskManifest = this._buildDiskManifest(root);
+    const diskFiles = new Set(Object.keys(diskManifest));
+
+    let offset: string | number | undefined;
+    let migrated = 0;
+    let skipped  = 0;
+
+    while (true) {
+      const result = await qd.scroll(COLLECTION, {
+        filter: {
+          must: [
+            { key: "project_id", match: { value: cfg.projectId } },
+          ],
+          must_not: [
+            { key: "branches", match: { value: branch } },
+          ],
+        },
+        limit:        500,
+        with_payload: ["chunk_type", "file_path", "file_hash"],
+        with_vector:  false,
+        ...(offset !== undefined && { offset }),
+      }).catch((): { points: []; next_page_offset: undefined } => ({ points: [], next_page_offset: undefined }));
+
+      // Only tag chunks whose file exists on disk with matching hash
+      const ids: string[] = [];
+      for (const p of result.points) {
+        const pl = (p.payload as Record<string, unknown>) ?? {};
+        const ct = pl["chunk_type"];
+        if (ct === "git_state" || ct === "branch_manifest") continue;
+
+        const filePath = String(pl["file_path"] ?? "");
+        const fileHash = String(pl["file_hash"] ?? "");
+        if (!filePath || !diskFiles.has(filePath)) { skipped++; continue; }
+        if (fileHash && diskManifest[filePath] && fileHash !== diskManifest[filePath]) { skipped++; continue; }
+
+        ids.push(String(p.id));
+      }
+
+      if (ids.length > 0) {
+        await qd.setPayload(COLLECTION, {
+          payload: { branches: [branch] },
+          points: ids,
+          wait: true,
+        } as never);
+        migrated += ids.length;
+      }
+
+      const next = (result as { next_page_offset?: string | number | null }).next_page_offset;
+      if (!next) break;
+      offset = next;
+    }
+
+    if (migrated > 0 || skipped > 0) {
+      process.stderr.write(`[indexer] Migration: tagged ${migrated} chunks with branch "${branch}", skipped ${skipped}\n`);
+    }
+  }
+
+  /**
+   * Garbage-collect chunks for branches that no longer exist in git.
+   */
+  async gc(root: string): Promise<void> {
+    const { getLocalBranches, deleteManifest } = await import("./git.js");
+    const liveBranches = new Set(getLocalBranches(root));
+    if (liveBranches.size === 0) liveBranches.add("default");
+
+    // Collect all unique branch values from indexed chunks
+    const allBranches = new Set<string>();
+    let offset: string | number | undefined;
+
+    while (true) {
+      const result = await qd.scroll(COLLECTION, {
+        filter: { must: [{ key: "project_id", match: { value: cfg.projectId } }] },
+        limit:        500,
+        with_payload: ["branches", "chunk_type"],
+        with_vector:  false,
+        ...(offset !== undefined && { offset }),
+      }).catch((): { points: []; next_page_offset: undefined } => ({ points: [], next_page_offset: undefined }));
+
+      for (const p of result.points) {
+        const pl = (p.payload ?? {}) as Record<string, unknown>;
+        if (pl["chunk_type"] === "git_state" || pl["chunk_type"] === "branch_manifest") continue;
+        const branches = pl["branches"] as string[] | undefined ?? [];
+        for (const b of branches) allBranches.add(b);
+      }
+
+      const next = (result as { next_page_offset?: string | number | null }).next_page_offset;
+      if (!next) break;
+      offset = next;
+    }
+
+    const staleBranches = [...allBranches].filter((b) => !liveBranches.has(b));
+    if (staleBranches.length === 0) {
+      process.stderr.write("[gc] No stale branches found\n");
+      return;
+    }
+
+    process.stderr.write(`[gc] Cleaning up ${staleBranches.length} stale branch(es): ${staleBranches.join(", ")}\n`);
+
+    // For each stale branch: remove it from chunks' branches[], delete manifests
+    for (const branch of staleBranches) {
+      let gcOffset: string | number | undefined;
+      let cleaned = 0;
+
+      while (true) {
+        const result = await qd.scroll(COLLECTION, {
+          filter: {
+            must: [
+              { key: "project_id", match: { value: cfg.projectId } },
+              { key: "branches",   match: { value: branch        } },
+            ],
+          },
+          limit:        500,
+          with_payload: ["branches"],
+          with_vector:  false,
+          ...(gcOffset !== undefined && { offset: gcOffset }),
+        }).catch((): { points: []; next_page_offset: undefined } => ({ points: [], next_page_offset: undefined }));
+
+        for (const p of result.points) {
+          const old = ((p.payload ?? {}) as Record<string, unknown>)["branches"] as string[] | undefined ?? [];
+          const updated = old.filter((b) => b !== branch);
+          if (updated.length === 0) {
+            await qd.delete(COLLECTION, { points: [String(p.id)] });
+          } else {
+            await qd.setPayload(COLLECTION, {
+              payload: { branches: updated },
+              points: [String(p.id)],
+              wait: true,
+            } as never);
+          }
+          cleaned++;
+        }
+
+        const next = (result as { next_page_offset?: string | number | null }).next_page_offset;
+        if (!next) break;
+        gcOffset = next;
+      }
+
+      await deleteManifest(branch).catch(() => undefined);
+      process.stderr.write(`[gc] Branch "${branch}": cleaned ${cleaned} chunks\n`);
+    }
+  }
+
   async clear(): Promise<void> {
     await qd.delete(COLLECTION, {
       filter: { must: [{ key: "project_id", match: { value: cfg.projectId } }] },
@@ -594,6 +981,32 @@ export class CodeIndexer {
 
 function hashSource(source: string): string {
   return createHash("sha256").update(source).digest("hex");
+}
+
+/** Compare two manifests and return the list of changed files. */
+function diffManifests(
+  stored: FileManifest,
+  disk: FileManifest,
+): Array<{ path: string; status: "added" | "modified" | "deleted" }> {
+  const changes: Array<{ path: string; status: "added" | "modified" | "deleted" }> = [];
+
+  // Files in disk but not stored (added) or with different hash (modified)
+  for (const [path, hash] of Object.entries(disk)) {
+    if (!(path in stored)) {
+      changes.push({ path, status: "added" });
+    } else if (stored[path] !== hash) {
+      changes.push({ path, status: "modified" });
+    }
+  }
+
+  // Files in stored but not on disk (deleted)
+  for (const path of Object.keys(stored)) {
+    if (!(path in disk)) {
+      changes.push({ path, status: "deleted" });
+    }
+  }
+
+  return changes;
 }
 
 function buildEmbedContext(c: CodeChunk): string {

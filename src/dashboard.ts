@@ -1,7 +1,8 @@
 import Fastify from "fastify";
 import fastifyStatic from "@fastify/static";
 import type { ServerResponse } from "node:http";
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
+import { getCurrentBranch } from "./indexer/git.js";
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -52,6 +53,8 @@ interface ServerInfo {
   collectionPrefix:     string;
   embedProvider:        string;
   embedModel:           string;
+  llmProvider:          string;
+  llmModel:             string;
   generateDescriptions: boolean;
 }
 
@@ -59,6 +62,7 @@ interface ServerInfo {
 
 let _dispatch: DispatchFn | null = null;
 let _toolSchemasJson = "[]";
+let _serverInfo: ServerInfo | null = null;
 let _serverInfoJson  = "{}";
 let _active = false;
 
@@ -155,20 +159,19 @@ export function broadcastShutdown(): void {
   for (const res of new Set(sseClients)) res.write(data);
 }
 
+export function broadcastBranchSwitch(branch: string): void {
+  if (!_active || !_serverInfo) return;
+  _serverInfo.branch = branch;
+  _serverInfoJson = JSON.stringify(_serverInfo);
+  const data = `data: ${JSON.stringify({ type: "branch", branch })}\n\n`;
+  for (const res of new Set(sseClients)) res.write(data);
+}
+
 export function broadcastError(err: unknown): void {
   const message = err instanceof Error ? err.message : String(err);
   const stack   = err instanceof Error ? (err.stack ?? "") : "";
   const data = `data: ${JSON.stringify({ type: "error", message, stack, ts: Date.now() })}\n\n`;
   for (const res of new Set(sseClients)) res.write(data);
-}
-
-function getCurrentBranch(root: string): string {
-  const r = spawnSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
-    cwd: root || process.cwd(),
-    encoding: "utf8",
-    timeout: 2000,
-  });
-  return r.status === 0 ? r.stdout.trim() : "";
 }
 
 // ── Fastify server ────────────────────────────────────────────────────────────
@@ -273,7 +276,7 @@ export function endReindex(): void {
 export function startDashboard(port: number, toolSchemas: ToolSchemaDef[], dispatch: DispatchFn): void {
   _active = true;
   _dispatch = dispatch;
-  _serverInfoJson = JSON.stringify({
+  _serverInfo = {
     projectId:            cfg.projectId,
     agentId:              cfg.agentId,
     version:              PKG_VERSION,
@@ -282,8 +285,11 @@ export function startDashboard(port: number, toolSchemas: ToolSchemaDef[], dispa
     collectionPrefix:     cfg.collectionPrefix,
     embedProvider:        cfg.embedProvider,
     embedModel:           cfg.embedModel,
+    llmProvider:          cfg.llmProvider,
+    llmModel:             cfg.llmModel,
     generateDescriptions: cfg.generateDescriptions,
-  } satisfies ServerInfo);
+  };
+  _serverInfoJson = JSON.stringify(_serverInfo);
   _toolSchemasJson = JSON.stringify(toolSchemas);
   process.on("SIGINT",  () => { broadcastShutdown(); process.exit(0); });
   process.on("SIGTERM", () => { broadcastShutdown(); process.exit(0); });

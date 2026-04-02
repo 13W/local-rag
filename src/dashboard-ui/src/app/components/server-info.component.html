@@ -40,5 +40,11 @@
     <span class="text-(--color-muted)">embed</span>
     <span class="text-(--color-text)">{{ info().embedProvider }}:{{ info().embedModel }}</span>
   </span>
+  @if (info().llmModel) {
+    <span class="inline-flex items-center gap-1 bg-(--color-surface) px-[0.45rem] py-[0.15rem] rounded-[3px] whitespace-nowrap">
+      <span class="text-(--color-muted)">llm</span>
+      <span class="text-(--color-text)">{{ info().llmProvider }}:{{ info().llmModel }}</span>
+    </span>
+  }
 
 </div>

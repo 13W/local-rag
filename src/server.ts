@@ -8,11 +8,13 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 
 import { resolve } from "node:path";
+import { statSync } from "node:fs";
 import { ensureCollections } from "./qdrant.js";
 import { record, startDashboard, broadcastShutdown, broadcastError, startReindex, tickReindex, endReindex } from "./dashboard.js";
 import { CodeIndexer }  from "./indexer/indexer.js";
 import { startWatcher } from "./indexer/watcher.js";
-import { cfg } from "./config.js";
+import { cfg, setCurrentBranch } from "./config.js";
+import { getCurrentBranch, isGitRepo, loadGitState, saveGitState } from "./indexer/git.js";
 import { rememberTool }         from "./tools/remember.js";
 import { recallTool }           from "./tools/recall.js";
 import { searchCodeTool }       from "./tools/search_code.js";
@@ -78,6 +80,7 @@ const TOOLS = [
         rerank_k:      { type: "integer", description: "ANN candidates to fetch before reranking", default: 50 },
         top:           { type: "integer", description: "Results to return after reranking (default: limit)", default: 10 },
         name_pattern:  { type: "string",  description: "Filter by symbol name substring (e.g. \"use*\" for React hooks)", default: "" },
+        branch:        { type: "string",  description: "Override branch filter (default: current branch)", default: "" },
       },
       required: ["query"],
     },
@@ -237,6 +240,7 @@ export async function dispatchTool(name: string, a: Record<string, unknown>): Pr
       rerank_k:     int(a["rerank_k"],     50),
       top:          int(a["top"],          10),
       name_pattern: str(a["name_pattern"], ""),
+      branch:       str(a["branch"],       ""),
     });
   }
   if (name === "get_symbol") {
@@ -345,7 +349,12 @@ if (cfg.dashboard) startDashboard(cfg.dashboardPort, TOOLS, dispatchTool);
 if (cfg.watch) {
   const root    = cfg.projectRoot || process.cwd();
   const absRoot = resolve(root);
-  const indexer = new CodeIndexer({ generateDescriptions: cfg.generateDescriptions });
+  const currentBranch = isGitRepo(root) ? getCurrentBranch(root) : "default";
+  setCurrentBranch(currentBranch);
+  const indexer = new CodeIndexer({
+    generateDescriptions: cfg.generateDescriptions,
+    branch: currentBranch,
+  });
 
   const onReindex = (relPath: string, chunks: number) => {
     server.notification({
@@ -356,21 +365,86 @@ if (cfg.watch) {
     });
   };
 
-  // Initial scan: indexAll tracks every file (incl. unchanged), so progress is accurate.
-  // After scan, watcher starts with ignoreInitial=true (changes only).
-  const files = indexer.collectFiles(absRoot);
-  startReindex(files.length);
-  indexer.indexAll(absRoot, {
-    suppressCountLog: true,
-    onProgress: (_done, _total, chunks) => tickReindex(chunks),
-  }).then(() => {
-    endReindex();
+  // ── Git-aware startup ──────────────────────────────────────────────────────
+  const lastState = await loadGitState().catch(() => null);
+
+  const startWatcherAfterIndex = () => {
+    saveGitState({
+      lastBranch: currentBranch,
+      lastIndexTimestamp: Date.now(),
+      lastGcTimestamp: lastState?.lastGcTimestamp,
+    }).catch(() => undefined);
     startWatcher(root, indexer, onReindex, undefined, true);
-  }).catch((err: unknown) => {
-    process.stderr.write(`[indexer] initial scan error: ${String(err)}\n`);
-    endReindex();
-    startWatcher(root, indexer, onReindex, undefined, true);
-  });
+  };
+
+  if (!lastState) {
+    // First run: full scan with branch tagging
+    process.stderr.write(`[indexer] First run — full index on branch "${currentBranch}"\n`);
+    const files = indexer.collectFiles(absRoot);
+    startReindex(files.length);
+    indexer.indexAll(absRoot, {
+      suppressCountLog: true,
+      onProgress: (_done, _total, chunks) => tickReindex(chunks),
+    }).then(() => {
+      endReindex();
+      startWatcherAfterIndex();
+    }).catch((err: unknown) => {
+      process.stderr.write(`[indexer] initial scan error: ${String(err)}\n`);
+      endReindex();
+      startWatcherAfterIndex();
+    });
+  } else if (lastState.lastBranch !== currentBranch) {
+    // Branch changed while server was down — switchBranch
+    process.stderr.write(`[indexer] Branch changed: ${lastState.lastBranch} → ${currentBranch}\n`);
+    indexer.switchBranch(root, lastState.lastBranch, currentBranch).then(() => {
+      startWatcherAfterIndex();
+    }).catch((err: unknown) => {
+      process.stderr.write(`[indexer] branch switch error: ${String(err)}\n`);
+      startWatcherAfterIndex();
+    });
+  } else {
+    // Same branch — mtime optimization: only reindex files modified since last index
+    process.stderr.write(`[indexer] Startup on branch "${currentBranch}" — mtime check\n`);
+    const files = indexer.collectFiles(absRoot);
+    const staleFiles = files.filter((f) => {
+      try {
+        return statSync(f).mtimeMs > lastState.lastIndexTimestamp;
+      } catch { return true; }
+    });
+
+    if (staleFiles.length > 0) {
+      process.stderr.write(`[indexer] ${staleFiles.length}/${files.length} files modified since last run\n`);
+      startReindex(staleFiles.length);
+      let done = 0;
+      const processStale = async () => {
+        // Ensure migration has been run for existing chunks
+        await indexer.migrateBranches(currentBranch, absRoot).catch(() => undefined);
+        for (const absPath of staleFiles) {
+          await indexer.indexFileIncremental(absPath, absRoot).catch((err: unknown) => {
+            process.stderr.write(`[indexer] ${absPath}: ${String(err)}\n`);
+          });
+          done++;
+          tickReindex(0);
+        }
+      };
+      processStale().then(() => {
+        endReindex();
+        startWatcherAfterIndex();
+      }).catch((err: unknown) => {
+        process.stderr.write(`[indexer] mtime scan error: ${String(err)}\n`);
+        endReindex();
+        startWatcherAfterIndex();
+      });
+    } else {
+      process.stderr.write(`[indexer] No files modified — skipping reindex\n`);
+      // Still ensure migration is done
+      indexer.migrateBranches(currentBranch, absRoot).then(() => {
+        startWatcherAfterIndex();
+      }).catch(() => {
+        startWatcherAfterIndex();
+      });
+    }
+  }
 }
 process.stderr.write("[memory] MCP server ready\n");
 

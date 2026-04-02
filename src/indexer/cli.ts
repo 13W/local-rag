@@ -12,6 +12,7 @@ Usage:
   local-rag stats                — show collection stats
   local-rag file   <abs> <root>  — index a single file
   local-rag repair <root>        — fix empty symbol names without re-embedding
+  local-rag gc     <root>        — clean up chunks for deleted git branches
 
 Options:
   -c, --config <file>         Load options from a JSON config file
@@ -94,6 +95,11 @@ if (cmd === "index") {
 } else if (cmd === "repair") {
   const root = resolve(arg2 ?? ".");
   await indexer.repairNames(root);
+  process.exit(0);
+
+} else if (cmd === "gc") {
+  const root = resolve(arg2 ?? ".");
+  await indexer.gc(root);
   process.exit(0);
 
 } else {

@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { qd, colName } from "../qdrant.js";
-import { cfg } from "../config.js";
+import { cfg, getCurrentBranchCached } from "../config.js";
 
 export interface GetFileContextArgs {
   file_path:     string;
@@ -30,6 +30,7 @@ export async function getFileContextTool(a: GetFileContextArgs): Promise<string>
         must: [
           { key: "file_path",  match: { value: a.file_path   } },
           { key: "project_id", match: { value: cfg.projectId } },
+          { key: "branches",   match: { value: getCurrentBranchCached() } },
         ],
       },
       limit:        200,
