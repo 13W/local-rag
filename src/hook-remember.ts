@@ -111,7 +111,7 @@ function detectSessionType(input: HookInput, lines: JsonLine[]): SessionDetectio
       ];
       const found = candidates.find((v) => typeof v === "string" && v.trim() !== "");
       if (found) agentId = String(found);
-      break;
+      continue;
     }
     const msg = line["message"] as JsonLine | undefined;
     if (!msg) continue;

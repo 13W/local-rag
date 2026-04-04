@@ -41,6 +41,27 @@ export interface StoreMemoryParams {
   ttlHours:   number;
 }
 
+// ── New memory schema (specification.md) ──────────────────────────────────────
+
+export type Status      = "in_progress" | "resolved" | "open_question" | "hypothesis";
+export type SessionType = "planning" | "editing" | "headless" | "multi_agent";
+
+/** Canonical payload for `memory` and `memory_agents` collections. */
+export interface MemoryEntryPayload {
+  text:         string;        // raw content (distinct from legacy "content" field)
+  status:       Status;
+  session_id:   string;        // Claude Code session_id from hook input
+  session_type: SessionType;
+  created_at:   string;        // ISO 8601
+  updated_at:   string;        // ISO 8601
+  resolved_at:  string | null; // ISO 8601 or null
+  confidence:   number;        // 0.0–1.0 (router score)
+  source:       string;        // e.g. "hook-remember:stop" | "hook-remember:session_end"
+  project_id:   string;
+  agent_id:     string;
+  content_hash: string;        // SHA-256 first 16 hex chars, dedup key
+}
+
 export interface CodeChunk {
   content:    string;
   filePath:   string;

@@ -82,7 +82,22 @@ const SETTINGS_HOOKS = {
     UserPromptSubmit: [
       {
         matcher: "",
-        hooks: [{ type: "command", command: "bash .claude/hooks/prompt-reminder.sh", timeout: 3 }],
+        hooks: [
+          { type: "command", command: "bash .claude/hooks/prompt-reminder.sh", timeout: 3 },
+          { type: "command", command: "npx @13w/local-rag hook-recall --config .memory.json", timeout: 10 },
+        ],
+      },
+    ],
+    Stop: [
+      {
+        matcher: "",
+        hooks: [{ type: "command", command: "npx @13w/local-rag hook-remember --config .memory.json", timeout: 60 }],
+      },
+    ],
+    SessionEnd: [
+      {
+        matcher: "",
+        hooks: [{ type: "command", command: "npx @13w/local-rag hook-remember --config .memory.json", timeout: 60 }],
       },
     ],
   },

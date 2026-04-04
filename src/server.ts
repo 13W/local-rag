@@ -9,7 +9,7 @@ import {
 
 import { resolve } from "node:path";
 import { statSync } from "node:fs";
-import { ensureCollections } from "./qdrant.js";
+import { ensureCollections, qd, colName } from "./qdrant.js";
 import { record, startDashboard, broadcastShutdown, broadcastError, startReindex, tickReindex, endReindex } from "./dashboard.js";
 import { CodeIndexer }  from "./indexer/indexer.js";
 import { startWatcher } from "./indexer/watcher.js";
@@ -26,6 +26,8 @@ import { getDependenciesTool }  from "./tools/get_dependencies.js";
 import { projectOverviewTool }  from "./tools/project_overview.js";
 import { getSymbolTool }        from "./tools/get_symbol.js";
 import { findUsagesTool }       from "./tools/find_usages.js";
+import { requestValidationTool } from "./tools/request-validation.js";
+import type { Status }           from "./types.js";
 
 // ── Tool definitions (JSON Schema) ──────────────────────────────────────────
 
@@ -179,10 +181,123 @@ const TOOLS = [
       required: [],
     },
   },
+  {
+    name: "request_validation",
+    description:
+      "Ask Claude to confirm a proposed memory update before writing to Qdrant.\n" +
+      "Called by the router when its confidence is between 0.5 and 0.75.\n" +
+      "Above 0.75 the router writes directly. Below 0.5 it discards silently.\n\n" +
+      "Respond with exactly one of:\n" +
+      "  confirmed            — write the entry as proposed\n" +
+      "  corrected:<status>   — write with a corrected status (e.g. corrected:resolved)\n" +
+      "  skip                 — discard; this entry is irrelevant or incorrect",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        proposed_text:   { type: "string", description: "What the router wants to remember" },
+        proposed_status: {
+          type: "string",
+          description: "Status the router assigned",
+          enum: ["in_progress", "resolved", "open_question", "hypothesis"],
+        },
+        similar_entry: {
+          type: "string",
+          description: "Existing Qdrant entry found nearby (empty string when none)",
+          default: "",
+        },
+        question: { type: "string", description: "Specific question the router has" },
+      },
+      required: ["proposed_text", "proposed_status", "question"],
+    },
+  },
 ];
 
 // Fast name→tool lookup used for validation
 const TOOL_MAP = new Map(TOOLS.map(t => [t.name, t]));
+
+// ── Connection-time instructions snapshot ────────────────────────────────────
+
+async function buildConnectionInstructions(): Promise<string> {
+  const symbolCount = await qd
+    .count(colName("code_chunks"), {
+      filter: { must: [{ key: "project_id", match: { value: cfg.projectId } }] },
+    })
+    .then((r) => r.count)
+    .catch(() => 0);
+
+  const gitState    = await loadGitState().catch(() => null);
+  const lastIndexed = gitState?.lastIndexTimestamp
+    ? new Date(gitState.lastIndexTimestamp).toISOString().slice(0, 16).replace("T", " ")
+    : "unknown";
+
+  const MEMORY_BASES = ["memory_episodic", "memory_semantic", "memory_procedural"] as const;
+  const STATUS_SET   = new Set(["in_progress", "resolved", "open_question", "hypothesis"]);
+  type Entry = { content: string; updatedAt: string; status: string };
+  const all: Entry[] = [];
+
+  await Promise.all(
+    MEMORY_BASES.map(async (base) => {
+      const result = await qd
+        .scroll(colName(base), {
+          filter:       { must: [{ key: "project_id", match: { value: cfg.projectId } }] },
+          limit:        500,
+          with_payload: ["content", "updated_at", "tags", "memory_type"],
+          with_vector:  false,
+        })
+        .catch(() => ({ points: [] as Array<{ payload?: Record<string, unknown> }> }));
+
+      for (const pt of result.points as Array<{ payload?: Record<string, unknown> }>) {
+        const p       = (pt.payload ?? {}) as Record<string, unknown>;
+        const content = typeof p["content"]     === "string" ? p["content"]     : "";
+        const updated = typeof p["updated_at"]  === "string" ? p["updated_at"]  : "";
+        const tags    = Array.isArray(p["tags"]) ? (p["tags"] as string[])      : [];
+        const mtype   = typeof p["memory_type"] === "string" ? p["memory_type"] : base.replace("memory_", "");
+        const status  = tags.find((t) => STATUS_SET.has(t)) ?? mtype;
+        all.push({ content, updatedAt: updated, status });
+      }
+    })
+  );
+
+  all.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+
+  const today    = new Date().toISOString().slice(0, 10);
+  const inProg   = all.filter((e) => e.status === "in_progress");
+  const openQ    = all.filter((e) => e.status === "open_question");
+  const resToday = all.filter((e) => e.status === "resolved" && e.updatedAt.startsWith(today));
+  const recent   = all.slice(0, 5);
+
+  const lines: string[] = [];
+  lines.push(`Project: ${cfg.projectId}`);
+  lines.push(`Indexed: ${symbolCount} symbols, last updated ${lastIndexed}`);
+  lines.push("");
+  lines.push("Memory state:");
+
+  if (all.length === 0) {
+    lines.push("  No entries. First session — nothing to recall.");
+  } else {
+    const fmt = (entries: Entry[], max = 3) =>
+      entries
+        .slice(0, max)
+        .map((e) => (e.content.length > 70 ? e.content.slice(0, 70) + "\u2026" : e.content))
+        .join("; ");
+
+    if (inProg.length   > 0) lines.push(`  In progress (${inProg.length}): ${fmt(inProg)}`);
+    if (openQ.length    > 0) lines.push(`  Open questions (${openQ.length}): ${fmt(openQ)}`);
+    if (resToday.length > 0) lines.push(`  Resolved today (${resToday.length}): ${fmt(resToday)}`);
+    if (inProg.length === 0 && openQ.length === 0 && resToday.length === 0)
+      lines.push(`  ${all.length} entries (all ${all[0]?.status ?? "semantic"})`);
+
+    lines.push("");
+    lines.push("Recent activity:");
+    for (const e of recent) {
+      const ts    = e.updatedAt ? e.updatedAt.slice(0, 16).replace("T", " ") : "?";
+      const short = e.content.length > 75 ? e.content.slice(0, 75) + "\u2026" : e.content;
+      lines.push(`  [${e.status}] ${short} (${ts})`);
+    }
+  }
+
+  return lines.join("\n");
+}
 
 // ── Argument helpers ─────────────────────────────────────────────────────────
 
@@ -285,6 +400,14 @@ export async function dispatchTool(name: string, a: Record<string, unknown>): Pr
   if (name === "project_overview") {
     return projectOverviewTool();
   }
+  if (name === "request_validation") {
+    return requestValidationTool({
+      proposed_text:   str(a["proposed_text"]),
+      proposed_status: str(a["proposed_status"]) as Status,
+      similar_entry:   str(a["similar_entry"],   ""),
+      question:        str(a["question"]),
+    });
+  }
   return `unknown tool: ${name}`;
 }
 
@@ -345,6 +468,12 @@ process.on("unhandledRejection", (reason: unknown) => {
 // ── Startup ──────────────────────────────────────────────────────────────────
 
 await ensureCollections();
+
+// Populate MCP instructions with a live snapshot of project state.
+// Runs once at connection time so Claude immediately knows the memory state.
+const _connInstructions = await buildConnectionInstructions().catch(() => "Memory snapshot unavailable.");
+(server as unknown as { _instructions?: string })._instructions = _connInstructions;
+
 if (cfg.dashboard) startDashboard(cfg.dashboardPort, TOOLS, dispatchTool);
 if (cfg.watch) {
   const root    = cfg.projectRoot || process.cwd();

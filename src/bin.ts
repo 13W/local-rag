@@ -10,6 +10,12 @@ if (cmd === "serve" || cmd === "server") {
 } else if (cmd === "migrate") {
   const { runMigrate } = await import("./migrate.js");
   await runMigrate();
+} else if (cmd === "hook-recall") {
+  const { runHookRecall } = await import("./hook-recall.js");
+  await runHookRecall();
+} else if (cmd === "hook-remember") {
+  const { runHookRemember } = await import("./hook-remember.js");
+  await runHookRemember();
 } else {
   await import("./indexer/cli.js");
 }

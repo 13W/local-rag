@@ -7,6 +7,8 @@ export const COLLECTIONS = [
   "memory_episodic",
   "memory_semantic",
   "memory_procedural",
+  "memory",
+  "memory_agents",
   "code_chunks",
 ] as const;
 
@@ -86,6 +88,24 @@ async function ensureCodeChunks(): Promise<void> {
   process.stderr.write(`[qdrant] Created collection: ${col} (named vectors)\n`);
 }
 
+const NEW_MEMORY_COLLECTIONS = ["memory", "memory_agents"] as const;
+const NEW_MEMORY_INDEXES = [
+  "project_id", "agent_id", "status", "session_id",
+  "session_type", "content_hash", "source",
+] as const;
+
+async function ensureNewMemoryCollections(existing: Set<string>): Promise<void> {
+  for (const name of NEW_MEMORY_COLLECTIONS) {
+    const col = colName(name);
+    if (existing.has(col)) continue;
+    await qd.createCollection(col, { vectors: { size: cfg.embedDim, distance: "Cosine" } });
+    for (const field of NEW_MEMORY_INDEXES) {
+      await qd.createPayloadIndex(col, { field_name: field, field_schema: "keyword", wait: true });
+    }
+    process.stderr.write(`[qdrant] Created collection: ${col}\n`);
+  }
+}
+
 export async function ensureCollections(): Promise<void> {
   const { collections } = await qd.getCollections();
   const existing = new Set(collections.map((c) => c.name));
@@ -109,5 +129,6 @@ export async function ensureCollections(): Promise<void> {
     process.stderr.write(`[qdrant] Created collection: ${col}\n`);
   }
 
+  await ensureNewMemoryCollections(existing);
   await ensureCodeChunks();
 }

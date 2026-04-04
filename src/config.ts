@@ -35,6 +35,15 @@ const { values } = parseArgs({
   strict: false,
 });
 
+/** Provider block inside the "router" key of .memory.json. */
+export interface RouterProviderSpec {
+  provider:  "ollama" | "anthropic" | "openai" | "gemini";
+  model:     string;
+  api_key?:  string;
+  url?:      string;
+  fallback?: RouterProviderSpec | null;
+}
+
 type ConfigFile = Partial<{
   "qdrant-url":             string;
   "ollama-url":             string;
@@ -56,6 +65,7 @@ type ConfigFile = Partial<{
   "dashboard"?:             boolean;
   "collection-prefix"?:     string;
   "no-watch"?:              boolean;
+  "router"?:                RouterProviderSpec;
 }>;
 
 let file: ConfigFile = {};
@@ -131,6 +141,7 @@ export const cfg = Object.freeze({
   dashboard:            bool("dashboard", true),
   collectionPrefix:     str("collection-prefix", ""),
   watch:                !bool("no-watch", false),
+  routerConfig:         (file["router"] ?? null) as RouterProviderSpec | null,
 });
 process.stderr.write(
   `[config] projectId=${cfg.projectId} projectRoot=${cfg.projectRoot || "(cwd)"} includePaths=${cfg.includePaths.length}\n`

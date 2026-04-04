@@ -143,7 +143,7 @@ async function callLlmAnthropic(prompt: string, maxTokens: number): Promise<stri
   return data.content[0]!.text;
 }
 
-function callLlm(prompt: string, maxTokens: number): Promise<string> {
+export function callLlm(prompt: string, maxTokens: number): Promise<string> {
   const fn =
     cfg.llmProvider === "anthropic" ? callLlmAnthropic
   : cfg.llmProvider === "openai"   ? callLlmOpenAI

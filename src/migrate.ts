@@ -6,7 +6,8 @@ import { cfg } from "./config.js";
 import { generateDescription } from "./embedder.js";
 
 const BATCH_SIZE = 32;
-const MEMORY_COLS = ["memory_episodic", "memory_semantic", "memory_procedural"] as const;
+const MEMORY_COLS     = ["memory_episodic", "memory_semantic", "memory_procedural"] as const;
+const NEW_MEMORY_COLS = ["memory", "memory_agents"] as const;
 const CODE_CHUNK  = "code_chunks";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -136,6 +137,13 @@ async function createMemoryCol(qd: QdrantClient, name: string, dim: number): Pro
   }
 }
 
+async function createNewMemoryCol(qd: QdrantClient, name: string, dim: number): Promise<void> {
+  await qd.createCollection(name, { vectors: { size: dim, distance: "Cosine" } });
+  for (const field of ["project_id", "agent_id", "status", "session_id", "session_type", "content_hash", "source"]) {
+    await qd.createPayloadIndex(name, { field_name: field, field_schema: "keyword", wait: true });
+  }
+}
+
 async function createCodeChunkCol(qd: QdrantClient, name: string, dim: number): Promise<void> {
   await qd.createCollection(name, {
     vectors: {
@@ -220,6 +228,40 @@ export async function runMigrate(): Promise<void> {
     }
 
     memProgress.finish();
+    process.stderr.write(`[migrate] ${base}: done\n`);
+  }
+
+  // ── New memory collections (memory / memory_agents) ──────────────────────
+  for (const base of NEW_MEMORY_COLS) {
+    const srcName = colName(fromPrefix, base);
+    const dstName = colName(toPrefix,   base);
+
+    if (!existingNames.has(srcName)) {
+      process.stderr.write(`[migrate] Skipping ${srcName} — not found\n`);
+      continue;
+    }
+    if (!existingNames.has(dstName)) {
+      await createNewMemoryCol(qd, dstName, newDim);
+      existingNames.add(dstName);
+    }
+
+    process.stderr.write(`[migrate] ${srcName} → ${dstName} (project_id=${projectId ?? "all"})…\n`);
+    const points   = await scrollAll(qd, srcName, projectId);
+    process.stderr.write(`[migrate] ${base}: ${points.length} pts → ${toModel} (dim=${newDim})\n`);
+    const progress = makeProgress(points.length);
+
+    for (const batch of chunkArr(points, BATCH_SIZE)) {
+      const payloads = batch.map((p) => (p.payload ?? {}) as Record<string, unknown>);
+      const texts    = payloads.map((p) => (p["text"] as string | undefined) ?? "");
+      const vecs     = await embedWithModel(toModel, texts, 3000);
+      await qd.upsert(dstName, {
+        wait:   true,
+        points: batch.map((pt, i) => ({ id: pt.id, vector: vecs[i]!, payload: payloads[i] })),
+      });
+      progress.tick(batch.length);
+    }
+
+    progress.finish();
     process.stderr.write(`[migrate] ${base}: done\n`);
   }
 

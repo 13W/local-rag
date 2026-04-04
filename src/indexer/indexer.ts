@@ -432,6 +432,108 @@ export class CodeIndexer {
       nonParent.some((p) => typeof (p.payload ?? {})["description"] !== "string");
   }
 
+  /**
+   * Patch chunks that already exist in Qdrant but are missing a description.
+   * Only generates descriptions (+ embeds them) — code vectors are untouched.
+   */
+  private async _patchMissingDescriptions(relPath: string): Promise<void> {
+    const toUpdate: Array<{
+      id:        string;
+      content:   string;
+      name:      string;
+      chunkType: string;
+      language:  string;
+      isChild:   boolean;
+    }> = [];
+
+    let offset: string | number | undefined;
+    while (true) {
+      const result = await qd.scroll(COLLECTION, {
+        filter: {
+          must: [
+            { key: "file_path",  match: { value: relPath       } },
+            { key: "project_id", match: { value: cfg.projectId } },
+          ],
+        },
+        limit:        500,
+        with_payload: ["description", "content", "name", "chunk_type", "language", "parent_id"],
+        with_vector:  false,
+        ...(offset !== undefined && { offset }),
+      }).catch((): { points: []; next_page_offset: undefined } => ({ points: [], next_page_offset: undefined }));
+
+      for (const p of result.points) {
+        const pl = (p.payload ?? {}) as Record<string, unknown>;
+        if (typeof pl["description"] === "string") continue;
+        toUpdate.push({
+          id:        String(p.id),
+          content:   String(pl["content"]    ?? ""),
+          name:      String(pl["name"]       ?? ""),
+          chunkType: String(pl["chunk_type"] ?? ""),
+          language:  String(pl["language"]   ?? ""),
+          isChild:   typeof pl["parent_id"]  === "string",
+        });
+      }
+
+      const next = (result as { next_page_offset?: string | number | null }).next_page_offset;
+      if (!next) break;
+      offset = next;
+    }
+
+    if (toUpdate.length === 0) return;
+
+    const fakeChunks: CodeChunk[] = toUpdate.map((t) => ({
+      content:   t.content,
+      name:      t.name,
+      chunkType: t.chunkType,
+      language:  t.language,
+      filePath:  relPath,
+      signature: "",
+      startLine: 0,
+      endLine:   0,
+      jsdoc:     "",
+    }));
+
+    const descriptions = await this.batchGenerateDescriptions(fakeChunks);
+
+    // Embed descriptions for non-child chunks (child chunks store description text
+    // but not a description_vector, matching the behaviour of _indexFileImpl).
+    const toEmbed: Array<{ idx: number; text: string }> = [];
+    for (let i = 0; i < toUpdate.length; i++) {
+      const d = descriptions[i];
+      if (d && !toUpdate[i]!.isChild) toEmbed.push({ idx: i, text: d });
+    }
+
+    const descVecs: (number[] | null)[] = new Array(toUpdate.length).fill(null);
+    if (toEmbed.length > 0) {
+      const vecs = await embedBatch(toEmbed.map((e) => e.text)).catch(() => null);
+      if (vecs) {
+        for (let j = 0; j < toEmbed.length; j++) {
+          descVecs[toEmbed[j]!.idx] = vecs[j] ?? null;
+        }
+      }
+    }
+
+    for (let i = 0; i < toUpdate.length; i++) {
+      const { id, isChild } = toUpdate[i]!;
+      const desc = descriptions[i];
+      const vec  = descVecs[i];
+      if (!desc) continue;
+
+      await qd.setPayload(COLLECTION, {
+        payload: { description: desc },
+        points:  [id],
+        wait:    true,
+      } as never);
+
+      if (!isChild && vec) {
+        await qd.updateVectors(COLLECTION, {
+          points: [{ id, vector: { [CODE_VECTORS.description]: vec } }],
+          wait:   true,
+        } as never);
+      }
+    }
+  }
+
   /** Generate descriptions for a batch of chunks (bounded concurrency). */
   private async batchGenerateDescriptions(chunks: CodeChunk[]): Promise<(string | null)[]> {
     const results: (string | null)[] = new Array(chunks.length).fill(null);
@@ -483,7 +585,9 @@ export class CodeIndexer {
     if (storedHash === newHash) {
       if (!this.genDescs) return [0, 0];
       if (!(await this.missingDescriptions(relPath))) return [0, 0];
-      process.stderr.write(`[indexer] re-indexing for descriptions: ${relPath}\n`);
+      process.stderr.write(`[indexer] patching missing descriptions: ${relPath}\n`);
+      await this._patchMissingDescriptions(relPath);
+      return [0, 0];
     }
 
     const chunks = await parseFile(relPath, source);
