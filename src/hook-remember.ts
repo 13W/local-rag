@@ -2,7 +2,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { cfg } from "./config.js";
 import { qd, colName } from "./qdrant.js";
 import { embedOne } from "./embedder.js";
-import { contentHash, nowIso } from "./util.js";
+import { contentHash, nowIso, logHeadlessDecision } from "./util.js";
 import { runRouter, type RouterOp } from "./router.js";
 import type { SessionType } from "./types.js";
 
@@ -191,6 +191,10 @@ async function processOp(
         },
       }],
     });
+  }
+
+  if (sessionType === "headless") {
+    logHeadlessDecision(cwd, op, /* written= */ true);
   }
 }
 
