@@ -136,6 +136,8 @@ async function processOp(
   col:         string,
   sessionType: SessionType,
   sessionId:   string,
+  agentId:     string,
+  cwd:         string,
   threshold:   number,
 ): Promise<void> {
   if (op.confidence < threshold) return;
@@ -184,7 +186,7 @@ async function processOp(
           confidence:   op.confidence,
           source:       "hook-remember:stop",
           project_id:   cfg.projectId,
-          agent_id:     cfg.agentId,
+          agent_id:     agentId,
           content_hash: contentHash(op.text),
         },
       }],
@@ -212,12 +214,12 @@ export async function runHookRemember(): Promise<void> {
     if (!transcriptPath || !existsSync(transcriptPath)) return;
 
     const sessionId   = input.session_id ?? "unknown";
+    const cwd         = input.cwd ?? process.cwd();
     const rawTranscript = readFileSync(transcriptPath, "utf8");
     const lines       = safeParseLines(rawTranscript);
     if (lines.length === 0) return;
 
     const { sessionType, agentId } = detectSessionType(input as HookInput, lines);
-    void agentId;
     const window        = buildWindow(lines);
     if (!window.trim()) return;
 
@@ -229,7 +231,7 @@ export async function runHookRemember(): Promise<void> {
 
     // Process ops sequentially to avoid hammering the embedder.
     for (const op of ops) {
-      await processOp(op, col, sessionType, sessionId, threshold).catch((err: unknown) => {
+      await processOp(op, col, sessionType, sessionId, agentId, cwd, threshold).catch((err: unknown) => {
         process.stderr.write(`[hook-remember] op failed: ${String(err)}\n`);
       });
     }
