@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
+import { appendFileSync } from "node:fs";
 import type { StoreMemoryParams } from "./types.js";
+import type { RouterOp } from "./router.js";
 import { cfg } from "./config.js";
 import { qd, colName } from "./qdrant.js";
 import { embedOne } from "./embedder.js";
@@ -75,4 +77,48 @@ export async function storeMemory(params: StoreMemoryParams): Promise<string> {
   });
 
   return `stored [${memoryType}]: ${memId} (importance=${importance})`;
+}
+
+/**
+ * Format borderline-confidence ops as a systemMessage asking Claude to call
+ * the request_validation MCP tool for each entry.
+ * Returns null when the list is empty.
+ */
+export function buildValidationRequests(ops: RouterOp[]): string | null {
+  if (ops.length === 0) return null;
+
+  const lines = [
+    "Memory router needs validation for the following entries.",
+    "Call request_validation for each:",
+    "",
+  ];
+
+  ops.forEach((op, i) => {
+    lines.push(
+      `${i + 1}. text: "${op.text.replace(/\n/g, " ").slice(0, 200)}" | status: ${op.status} | confidence: ${op.confidence.toFixed(2)}`,
+    );
+  });
+
+  return lines.join("\n");
+}
+
+/**
+ * Append one line to {cwd}/.memory-headless.log describing a headless-session
+ * write/skip decision. Errors are suppressed — logging must never block the hook.
+ */
+export function logHeadlessDecision(
+  cwd:     string,
+  op:      RouterOp,
+  written: boolean,
+): void {
+  try {
+    const ts      = new Date().toISOString();
+    const outcome = written ? "written" : "skipped";
+    const conf    = op.confidence.toFixed(2);
+    const text    = op.text.replace(/\n/g, " ").slice(0, 120);
+    const line    = `${ts}  ${outcome.padEnd(7)}  conf=${conf}  ${op.status.padEnd(14)}  "${text}"\n`;
+    appendFileSync(`${cwd}/.memory-headless.log`, line, "utf8");
+  } catch {
+    // intentionally silent
+  }
 }
