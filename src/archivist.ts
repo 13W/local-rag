@@ -115,6 +115,14 @@ async function _loadProfile(): Promise<ProjectProfile | null> {
   };
 }
 
+/** Stable UUID-shaped ID for this project's profile point (same projectId → same ID). */
+async function _profilePointId(): Promise<string> {
+  const { createHash } = await import("node:crypto");
+  const hash = createHash("sha256").update(`profile:${cfg.projectId}`).digest("hex");
+  // Format as UUID v4-shaped string (Qdrant requires UUID format)
+  return `${hash.slice(0,8)}-${hash.slice(8,12)}-4${hash.slice(13,16)}-${hash.slice(16,20)}-${hash.slice(20,32)}`;
+}
+
 /**
  * Build and cache a project profile in Qdrant.
  * No-op if a fresh profile (< 24h) already exists.
@@ -185,10 +193,12 @@ export async function buildProjectProfile(): Promise<void> {
     collectionStats: stats,
   };
 
+  // Deterministic ID so upsert overwrites the existing profile point.
+  const profileId = await _profilePointId();
   const vector = await embedOne(topTopics.join(" "));
   await qd.upsert(colName("memory"), {
     points: [{
-      id:      crypto.randomUUID(),
+      id:      profileId,
       vector,
       payload: { _type: PROFILE_TYPE, project_id: cfg.projectId, ...profile },
     }],
@@ -242,15 +252,25 @@ async function _executeSearchMemory(args: Record<string, unknown>): Promise<stri
   ];
   if (status) mustFilter.push({ key: "status", match: { value: status } });
 
-  const collections = colBases.map(b => colName(b === "memory" ? "memory" : `memory_${b}`));
+  const tags = Array.isArray(args["tags"]) ? (args["tags"] as string[]).filter(Boolean) : [];
+
+  // Strip any accidental "memory_" prefix the model may have added, then normalise.
+  const collections = colBases.map(b => {
+    const base = b.replace(/^memory_/, "");
+    return colName(base === "memory" ? "memory" : `memory_${base}`);
+  });
 
   type QHit = Awaited<ReturnType<typeof qd.search>>[number];
   const allHits: QHit[] = [];
 
   await Promise.all(collections.map(async col => {
+    const filter: Record<string, unknown> = { must: mustFilter };
+    if (tags.length > 0) {
+      filter["should"] = tags.map(t => ({ key: "tags", match: { value: t } }));
+    }
     const hits = await qd.search(col, {
       vector,
-      filter:          { must: mustFilter },
+      filter: filter as Parameters<typeof qd.search>[1]["filter"],
       limit,
       with_payload:    true,
       score_threshold: 0.3,
