@@ -78,7 +78,7 @@ async function _callOpenAISimple(prompt: string, model: string, apiKey: string, 
   });
   if (!resp.ok) { const b = await resp.text().catch(() => ""); throw new Error(`OpenAI simple: ${resp.status} — ${b}`); }
   const data = await resp.json() as { choices: { message: { content: string } }[] };
-  return data.choices[0]!.message.content;
+  return data.choices[0]?.message.content ?? "";
 }
 
 async function _callAnthropicSimple(prompt: string, model: string, apiKey: string, baseUrl: string): Promise<string> {
@@ -103,7 +103,7 @@ async function _callGeminiSimple(prompt: string, model: string, apiKey: string, 
   });
   if (!resp.ok) { const b = await resp.text().catch(() => ""); throw new Error(`Gemini simple: ${resp.status} — ${b}`); }
   const data = await resp.json() as { candidates: { content: { parts: { text: string }[] } }[] };
-  return data.candidates[0]!.content.parts[0]!.text;
+  return data.candidates[0]?.content.parts[0]?.text ?? "";
 }
 
 // ── Tool-enabled call ─────────────────────────────────────────────────────────
@@ -156,7 +156,12 @@ async function _callOllamaWithTools(
   if (!msg1.tool_calls?.length) return msg1.content;
 
   const tc = msg1.tool_calls[0]!;
-  const toolResult = await toolExecutor(tc.function.name, tc.function.arguments);
+  let toolResult: string;
+  try {
+    toolResult = await toolExecutor(tc.function.name, tc.function.arguments);
+  } catch (err: unknown) {
+    toolResult = JSON.stringify({ error: String(err) });
+  }
 
   const msgs2 = [...msgs1, { role: "assistant", content: msg1.content, tool_calls: msg1.tool_calls }, { role: "tool", content: toolResult }];
   const resp2 = await fetch(`${baseUrl}/api/chat`, {
@@ -191,13 +196,24 @@ async function _callOpenAIWithTools(
   });
   if (!resp1.ok) { const b = await resp1.text().catch(() => ""); throw new Error(`OpenAI tools: ${resp1.status} — ${b}`); }
   const data1 = await resp1.json() as { choices: { message: { content: string | null; tool_calls?: { id: string; function: { name: string; arguments: string } }[] } }[] };
-  const msg1 = data1.choices[0]!.message;
+  const msg1 = data1.choices[0]?.message;
+  if (!msg1) return "";
 
   if (!msg1.tool_calls?.length) return msg1.content ?? "";
 
   const tc = msg1.tool_calls[0]!;
-  const toolArgs = JSON.parse(tc.function.arguments) as Record<string, unknown>;
-  const toolResult = await toolExecutor(tc.function.name, toolArgs);
+  let toolArgs: Record<string, unknown>;
+  try {
+    toolArgs = JSON.parse(tc.function.arguments) as Record<string, unknown>;
+  } catch {
+    throw new Error(`OpenAI tool call: invalid JSON in arguments: ${tc.function.arguments}`);
+  }
+  let toolResult: string;
+  try {
+    toolResult = await toolExecutor(tc.function.name, toolArgs);
+  } catch (err: unknown) {
+    toolResult = JSON.stringify({ error: String(err) });
+  }
 
   const msgs2 = [...msgs1, msg1, { role: "tool", tool_call_id: tc.id, content: toolResult }];
   const resp2 = await fetch(`${baseUrl}/v1/chat/completions`, {
@@ -207,7 +223,7 @@ async function _callOpenAIWithTools(
   });
   if (!resp2.ok) { const b = await resp2.text().catch(() => ""); throw new Error(`OpenAI tool result: ${resp2.status} — ${b}`); }
   const data2 = await resp2.json() as { choices: { message: { content: string } }[] };
-  return data2.choices[0]!.message.content;
+  return data2.choices[0]?.message.content ?? "";
 }
 
 // ── Anthropic tool calling ────────────────────────────────────────────────────
@@ -237,7 +253,12 @@ async function _callAnthropicWithTools(
     return data1.content.find(c => c.type === "text")?.text ?? "";
   }
 
-  const toolResult = await toolExecutor(toolUse.name, toolUse.input ?? {});
+  let toolResult: string;
+  try {
+    toolResult = await toolExecutor(toolUse.name, toolUse.input ?? {});
+  } catch (err: unknown) {
+    toolResult = JSON.stringify({ error: String(err) });
+  }
 
   const resp2 = await fetch(`${baseUrl}/v1/messages`, {
     method: "POST", headers,
@@ -284,12 +305,17 @@ async function _callGeminiWithTools(
     candidates: { content: { role: string; parts: Array<{ text?: string; functionCall?: { name: string; args: Record<string, unknown> } }> } }[];
   };
 
-  const parts1 = data1.candidates[0]!.content.parts;
+  const parts1 = data1.candidates[0]?.content.parts ?? [];
   const fcPart = parts1.find(p => p.functionCall);
   if (!fcPart?.functionCall) return parts1.find(p => p.text)?.text ?? "";
 
   const fc = fcPart.functionCall;
-  const toolResult = await toolExecutor(fc.name, fc.args);
+  let toolResult: string;
+  try {
+    toolResult = await toolExecutor(fc.name, fc.args);
+  } catch (err: unknown) {
+    toolResult = JSON.stringify({ error: String(err) });
+  }
 
   const contents2 = [
     ...contents1,
@@ -304,5 +330,5 @@ async function _callGeminiWithTools(
   });
   if (!resp2.ok) { const b = await resp2.text().catch(() => ""); throw new Error(`Gemini tool result: ${resp2.status} — ${b}`); }
   const data2 = await resp2.json() as { candidates: { content: { parts: { text?: string }[] } }[] };
-  return data2.candidates[0]!.content.parts.find(p => p.text)?.text ?? "";
+  return data2.candidates[0]?.content.parts.find(p => p.text)?.text ?? "";
 }
