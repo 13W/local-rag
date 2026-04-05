@@ -7,6 +7,8 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { cfg } from "./config.js";
+import { qd, colName } from "./qdrant.js";
+import { embedOne } from "./embedder.js";
 
 const _dir   = dirname(fileURLToPath(import.meta.url));
 const _uiDir = resolve(_dir, "dashboard-ui");
@@ -229,6 +231,147 @@ fastify.post<{ Body: { tool: string; args: Record<string, unknown> } }>("/api/ru
       record(tool, "playground", bytesIn, 0, ms, false, errStr);
       void reply.code(500).send({ ok: false, error: String(err), ms });
     });
+});
+
+// ── Memory API helpers ────────────────────────────────────────────────────────
+
+interface MemoryEntry {
+  id:           string;
+  text:         string;
+  status:       string;
+  confidence:   number;
+  session_id:   string;
+  session_type: string;
+  updated_at:   string;
+  created_at:   string;
+}
+
+async function scrollMemoryEntries(): Promise<MemoryEntry[]> {
+  const collections = [colName("memory"), colName("memory_agents")];
+  const allEntries: MemoryEntry[] = [];
+  const seenHashes = new Set<string>();
+
+  for (const col of collections) {
+    let offset: string | number | undefined;
+    while (true) {
+      const result = await qd.scroll(col, {
+        filter:       { must: [{ key: "project_id", match: { value: cfg.projectId } }] },
+        limit:        500,
+        with_payload: true,
+        with_vector:  false,
+        ...(offset !== undefined && { offset }),
+      }).catch(() => ({ points: [] as { id: string | number; payload?: Record<string, unknown> | null }[], next_page_offset: null as null | string | number }));
+
+      for (const pt of result.points) {
+        const p    = (pt.payload ?? {}) as Record<string, unknown>;
+        const hash = String(p["content_hash"] ?? pt.id);
+        if (seenHashes.has(hash)) continue;
+        seenHashes.add(hash);
+        allEntries.push({
+          id:           String(pt.id),
+          text:         String(p["text"] ?? ""),
+          status:       String(p["status"] ?? "resolved"),
+          confidence:   Number(p["confidence"] ?? 0),
+          session_id:   String(p["session_id"] ?? ""),
+          session_type: String(p["session_type"] ?? ""),
+          updated_at:   String(p["updated_at"] ?? ""),
+          created_at:   String(p["created_at"] ?? ""),
+        });
+      }
+
+      const next = (result as { next_page_offset?: string | number | null }).next_page_offset;
+      if (!next) break;
+      offset = next;
+    }
+  }
+
+  return allEntries;
+}
+
+fastify.get("/api/memory/overview", async () => {
+  const entries = await scrollMemoryEntries();
+
+  const statusCounts: Record<string, number> = {
+    in_progress: 0, resolved: 0, open_question: 0, hypothesis: 0,
+  };
+  for (const e of entries) {
+    if (e.status in statusCounts) statusCounts[e.status]!++;
+  }
+
+  const recent = [...entries]
+    .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
+    .slice(0, 10);
+
+  const sessionMap = new Map<string, { count: number; types: Map<string, number>; latest: string }>();
+  for (const e of entries) {
+    if (!e.session_id) continue;
+    const s = sessionMap.get(e.session_id) ?? { count: 0, types: new Map<string, number>(), latest: "" };
+    s.count++;
+    s.types.set(e.session_type, (s.types.get(e.session_type) ?? 0) + 1);
+    if (e.updated_at > s.latest) s.latest = e.updated_at;
+    sessionMap.set(e.session_id, s);
+  }
+
+  const sessions = [...sessionMap.entries()]
+    .map(([session_id, s]) => {
+      let dominant_type = "";
+      let maxCount = 0;
+      for (const [t, c] of s.types) { if (c > maxCount) { maxCount = c; dominant_type = t; } }
+      return { session_id, count: s.count, dominant_type, latest: s.latest };
+    })
+    .sort((a, b) => b.latest.localeCompare(a.latest));
+
+  return { statusCounts, recent, sessions };
+});
+
+fastify.get<{ Querystring: { status?: string } }>("/api/memory/by-status", async (req) => {
+  const statuses = new Set((req.query.status ?? "").split(",").map(s => s.trim()).filter(Boolean));
+  const entries  = await scrollMemoryEntries();
+  const filtered = statuses.size > 0 ? entries.filter(e => statuses.has(e.status)) : entries;
+  return {
+    entries: filtered
+      .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
+      .slice(0, 100),
+  };
+});
+
+fastify.get<{ Querystring: { q?: string } }>("/api/memory/search", async (req) => {
+  const q = (req.query.q ?? "").trim();
+  if (!q) return { results: [] };
+
+  const vector    = await embedOne(q);
+  const mustFilter = [{ key: "project_id", match: { value: cfg.projectId } }];
+
+  type QHit = Awaited<ReturnType<typeof qd.search>>[number];
+  const [memHits, agentHits] = await Promise.all([
+    qd.search(colName("memory"), {
+      vector, filter: { must: mustFilter }, limit: 10, with_payload: true, score_threshold: 0.5,
+    }).catch((): QHit[] => []),
+    qd.search(colName("memory_agents"), {
+      vector, filter: { must: mustFilter }, limit: 10, with_payload: true, score_threshold: 0.5,
+    }).catch((): QHit[] => []),
+  ]);
+
+  const seen: Set<string> = new Set();
+  const results: Array<{ id: string; text: string; status: string; confidence: number; score: number; session_type: string; updated_at: string }> = [];
+  for (const hit of [...memHits, ...agentHits]) {
+    const p    = (hit.payload ?? {}) as Record<string, unknown>;
+    const hash = String(p["content_hash"] ?? hit.id);
+    if (seen.has(hash)) continue;
+    seen.add(hash);
+    results.push({
+      id:           String(hit.id),
+      text:         String(p["text"] ?? ""),
+      status:       String(p["status"] ?? "resolved"),
+      confidence:   Number(p["confidence"] ?? 0),
+      score:        hit.score,
+      session_type: String(p["session_type"] ?? ""),
+      updated_at:   String(p["updated_at"] ?? ""),
+    });
+  }
+
+  results.sort((a, b) => b.score - a.score);
+  return { results: results.slice(0, 5) };
 });
 
 // ── Exports ───────────────────────────────────────────────────────────────────

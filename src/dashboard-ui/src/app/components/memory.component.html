@@ -1,0 +1,158 @@
+<div class="h-full overflow-y-auto flex flex-col gap-4 pr-1">
+
+  @if (loading()) {
+    <p class="text-xs text-(--color-muted) mt-4">Loading…</p>
+  }
+
+  @if (overview(); as ov) {
+
+    <!-- Status counters -->
+    <section>
+      <h2 class="text-[0.9rem] font-semibold uppercase tracking-[0.07em] text-(--color-indigo)
+                  mb-1.5 pb-1 border-b border-(--color-border)">Status Counts</h2>
+      <div class="flex flex-wrap gap-2">
+        @for (s of statusOrder; track s) {
+          <div class="flex flex-col items-center px-4 py-2 rounded-[4px] border min-w-[7rem] select-none transition-opacity duration-100"
+               [class]="statusSquareClass(s)"
+               (click)="toggleStatus(s)">
+            <span class="text-2xl font-bold font-mono">{{ ov.statusCounts[s] ?? 0 }}</span>
+            <span class="text-[0.7rem] mt-0.5 opacity-80">{{ statusLabel(s) }}</span>
+          </div>
+        }
+      </div>
+      @if (selectedStatuses().size > 0) {
+        <p class="text-[0.7rem] text-(--color-muted) mt-1.5">
+          Filtering by: {{ [].constructor.from(selectedStatuses()).join(', ') }} — click again to deselect
+        </p>
+      }
+    </section>
+
+    <!-- Search -->
+    <section>
+      <h2 class="text-[0.9rem] font-semibold uppercase tracking-[0.07em] text-(--color-indigo)
+                  mb-1.5 pb-1 border-b border-(--color-border)">Semantic Search</h2>
+      <div class="flex gap-2 mb-2">
+        <input
+          class="flex-1 text-xs px-2 py-1 rounded-[4px] border border-(--color-border-input)
+                 bg-(--color-deep) text-(--color-text) outline-none focus:border-(--color-indigo)"
+          placeholder="type a phrase…"
+          [value]="searchQuery()"
+          (input)="handleSearchInput($any($event.target).value)"
+          (keydown.enter)="handleSearch()" />
+        <button
+          class="px-3 py-1 text-xs font-mono rounded-[4px] bg-(--color-action) text-white
+                 hover:bg-(--color-action-hover) cursor-pointer border-none"
+          [disabled]="searching()"
+          (click)="handleSearch()">
+          {{ searching() ? '…' : 'Search' }}
+        </button>
+      </div>
+
+      @if (searchResults().length > 0) {
+        <div class="flex flex-col gap-1.5">
+          @for (r of searchResults(); track r.id) {
+            <div class="rounded-[4px] border border-(--color-border) bg-(--color-surface) px-3 py-2">
+              <div class="flex items-center gap-2 mb-1">
+                <span class="text-[0.7rem] px-1.5 py-0.5 rounded-[3px] border font-mono"
+                      [class]="statusClass(r.status)">{{ r.status }}</span>
+                <span class="text-[0.7rem] text-(--color-muted) font-mono">
+                  score {{ scoreBar(r.score) }}
+                </span>
+                <span class="text-[0.7rem] font-mono" [class]="sessionTypeClass(r.session_type)">
+                  {{ r.session_type }}
+                </span>
+                <span class="ml-auto text-[0.68rem] text-(--color-muted)">{{ fmtDate(r.updated_at) }}</span>
+              </div>
+              <p class="text-xs text-(--color-text) m-0 leading-relaxed">{{ truncate(r.text) }}</p>
+            </div>
+          }
+        </div>
+      } @else if (!searching() && searchQuery().trim()) {
+        <p class="text-xs text-(--color-muted)">No results.</p>
+      }
+    </section>
+
+    <!-- Recent / filtered entries -->
+    <section>
+      <h2 class="text-[0.9rem] font-semibold uppercase tracking-[0.07em] text-(--color-indigo)
+                  mb-1.5 pb-1 border-b border-(--color-border) flex items-baseline gap-2">
+        @if (selectedStatuses().size > 0) {
+          Filtered Entries
+          <span class="normal-case font-normal text-xs text-(--color-muted) tracking-normal">
+            ({{ filteredEntries().length }} entries)
+          </span>
+        } @else {
+          Recent Entries
+          <span class="normal-case font-normal text-xs text-(--color-muted) tracking-normal">
+            (last 10 by updated_at)
+          </span>
+        }
+      </h2>
+
+      @if (filterLoading()) {
+        <p class="text-xs text-(--color-muted)">Loading…</p>
+      } @else if (entriesToShow(ov).length === 0) {
+        <p class="text-xs text-(--color-muted)">No memory entries yet.</p>
+      } @else {
+        <div class="flex flex-col gap-1.5">
+          @for (e of entriesToShow(ov); track e.id) {
+            <div class="rounded-[4px] border border-(--color-border) bg-(--color-surface) px-3 py-2">
+              <div class="flex items-center gap-2 mb-1">
+                <span class="text-[0.7rem] px-1.5 py-0.5 rounded-[3px] border font-mono"
+                      [class]="statusClass(e.status)">{{ e.status }}</span>
+                <span class="text-[0.7rem] text-(--color-muted) font-mono">
+                  conf {{ (e.confidence * 100).toFixed(0) }}%
+                </span>
+                <span class="text-[0.7rem] font-mono" [class]="sessionTypeClass(e.session_type)">
+                  {{ e.session_type }}
+                </span>
+                <span class="ml-auto text-[0.68rem] text-(--color-muted)">{{ fmtDate(e.updated_at) }}</span>
+              </div>
+              <p class="text-xs text-(--color-text) m-0 leading-relaxed">{{ truncate(e.text) }}</p>
+            </div>
+          }
+        </div>
+      }
+    </section>
+
+    <!-- Session history -->
+    <section class="pb-4">
+      <h2 class="text-[0.9rem] font-semibold uppercase tracking-[0.07em] text-(--color-indigo)
+                  mb-1.5 pb-1 border-b border-(--color-border)">Session History</h2>
+      @if (ov.sessions.length === 0) {
+        <p class="text-xs text-(--color-muted)">No sessions recorded.</p>
+      } @else {
+        <div class="overflow-x-auto border border-(--color-border) rounded-[4px]">
+          <table>
+            <thead>
+              <tr>
+                <th>session_id</th>
+                <th>entries</th>
+                <th>type</th>
+                <th>latest</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (s of ov.sessions; track s.session_id) {
+                <tr>
+                  <td class="font-mono text-[0.72rem] text-(--color-muted)">
+                    {{ s.session_id.slice(0, 16) }}…
+                  </td>
+                  <td class="font-mono text-[0.8rem]">{{ s.count }}</td>
+                  <td>
+                    <span class="text-[0.72rem] font-mono" [class]="sessionTypeClass(s.dominant_type)">
+                      {{ s.dominant_type }}
+                    </span>
+                  </td>
+                  <td class="text-[0.72rem] text-(--color-muted)">{{ fmtDate(s.latest) }}</td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      }
+    </section>
+
+  }
+
+</div>

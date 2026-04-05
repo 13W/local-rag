@@ -1,0 +1,156 @@
+import { Component, OnInit, signal } from "@angular/core";
+
+interface MemoryEntry {
+  id:           string;
+  text:         string;
+  status:       string;
+  confidence:   number;
+  session_id:   string;
+  session_type: string;
+  updated_at:   string;
+  created_at:   string;
+}
+
+interface SearchResult {
+  id:           string;
+  text:         string;
+  status:       string;
+  confidence:   number;
+  score:        number;
+  session_type: string;
+  updated_at:   string;
+}
+
+interface SessionEntry {
+  session_id:    string;
+  count:         number;
+  dominant_type: string;
+  latest:        string;
+}
+
+interface OverviewData {
+  statusCounts: Record<string, number>;
+  recent:       MemoryEntry[];
+  sessions:     SessionEntry[];
+}
+
+@Component({
+  selector:    "app-memory",
+  standalone:  true,
+  templateUrl: "./memory.component.html",
+})
+export class MemoryComponent implements OnInit {
+  readonly overview        = signal<OverviewData | null>(null);
+  readonly searchQuery     = signal("");
+  readonly searchResults   = signal<SearchResult[]>([]);
+  readonly searching       = signal(false);
+  readonly loading         = signal(true);
+  readonly selectedStatuses = signal<ReadonlySet<string>>(new Set());
+  readonly filteredEntries  = signal<MemoryEntry[]>([]);
+  readonly filterLoading    = signal(false);
+
+  ngOnInit(): void {
+    void fetch("/api/memory/overview")
+      .then(r => r.json() as Promise<OverviewData>)
+      .then(data => { this.overview.set(data); this.loading.set(false); })
+      .catch(() => { this.loading.set(false); });
+  }
+
+  toggleStatus(s: string): void {
+    const next = new Set(this.selectedStatuses());
+    if (next.has(s)) {
+      next.delete(s);
+    } else {
+      next.add(s);
+    }
+    this.selectedStatuses.set(next);
+    if (next.size > 0) {
+      this._fetchByStatus(next);
+    } else {
+      this.filteredEntries.set([]);
+    }
+  }
+
+  private _fetchByStatus(statuses: ReadonlySet<string>): void {
+    this.filterLoading.set(true);
+    const param = [...statuses].join(",");
+    void fetch(`/api/memory/by-status?status=${encodeURIComponent(param)}`)
+      .then(r => r.json() as Promise<{ entries: MemoryEntry[] }>)
+      .then(data => { this.filteredEntries.set(data.entries); this.filterLoading.set(false); })
+      .catch(() => { this.filterLoading.set(false); });
+  }
+
+  entriesToShow(ov: OverviewData): MemoryEntry[] {
+    return this.selectedStatuses().size > 0 ? this.filteredEntries() : ov.recent;
+  }
+
+  handleSearch(): void {
+    const q = this.searchQuery().trim();
+    if (!q) { this.searchResults.set([]); return; }
+    this.searching.set(true);
+    void fetch(`/api/memory/search?q=${encodeURIComponent(q)}`)
+      .then(r => r.json() as Promise<{ results: SearchResult[] }>)
+      .then(data => { this.searchResults.set(data.results); this.searching.set(false); })
+      .catch(() => { this.searching.set(false); });
+  }
+
+  handleSearchInput(value: string): void {
+    this.searchQuery.set(value);
+    if (!value.trim()) this.searchResults.set([]);
+  }
+
+  statusClass(status: string): string {
+    switch (status) {
+      case "resolved":      return "text-(--color-ok)    bg-(--color-ok)/10    border-(--color-ok)/30";
+      case "in_progress":   return "text-(--color-amber)  bg-(--color-amber)/10  border-(--color-amber)/30";
+      case "open_question": return "text-(--color-err)    bg-(--color-err)/10    border-(--color-err)/30";
+      case "hypothesis":    return "text-(--color-sky)    bg-(--color-sky)/10    border-(--color-sky)/30";
+      default:              return "text-(--color-muted)  bg-(--color-surface)   border-(--color-border)";
+    }
+  }
+
+  statusSquareClass(s: string): string {
+    const base = this.statusClass(s);
+    const sel  = this.selectedStatuses().has(s);
+    const any  = this.selectedStatuses().size > 0;
+    if (sel)  return `${base} cursor-pointer ring-2 ring-current`;
+    if (any)  return `${base} cursor-pointer opacity-40`;
+    return          `${base} cursor-pointer`;
+  }
+
+  statusLabel(status: string): string {
+    switch (status) {
+      case "in_progress":   return "in_progress";
+      case "open_question": return "open_question";
+      case "hypothesis":    return "hypothesis";
+      case "resolved":      return "resolved";
+      default:              return status;
+    }
+  }
+
+  sessionTypeClass(t: string): string {
+    switch (t) {
+      case "editing":     return "text-(--color-indigo)";
+      case "planning":    return "text-(--color-sky)";
+      case "headless":    return "text-(--color-amber)";
+      case "multi_agent": return "text-(--color-emerald)";
+      default:            return "text-(--color-muted)";
+    }
+  }
+
+  fmtDate(iso: string): string {
+    if (!iso) return "—";
+    const d = new Date(iso);
+    return `${d.toLocaleDateString()} ${d.toTimeString().slice(0, 5)}`;
+  }
+
+  truncate(text: string, max = 120): string {
+    return text.length > max ? text.slice(0, max) + "…" : text;
+  }
+
+  scoreBar(score: number): string {
+    return `${Math.round(score * 100)}%`;
+  }
+
+  readonly statusOrder = ["in_progress", "open_question", "hypothesis", "resolved"];
+}
