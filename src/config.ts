@@ -30,6 +30,7 @@ const { values } = parseArgs({
     "dashboard-port":        { type: "string" },
     "collection-prefix":     { type: "string" },
     "no-watch":              { type: "boolean" },
+    "debug-log-path":        { type: "string" },
   },
   allowPositionals: true,
   strict: false,
@@ -66,6 +67,7 @@ type ConfigFile = Partial<{
   "collection-prefix"?:     string;
   "no-watch"?:              boolean;
   "router"?:                RouterProviderSpec;
+  "debug-log-path"?:        string;
 }>;
 
 let file: ConfigFile = {};
@@ -142,10 +144,14 @@ export const cfg = Object.freeze({
   collectionPrefix:     str("collection-prefix", ""),
   watch:                !bool("no-watch", false),
   routerConfig:         (file["router"] ?? null) as RouterProviderSpec | null,
+  debugLogPath:         str("debug-log-path", ""),
 });
 process.stderr.write(
   `[config] projectId=${cfg.projectId} projectRoot=${cfg.projectRoot || "(cwd)"} includePaths=${cfg.includePaths.length}\n`
 );
+if (cfg.debugLogPath) {
+  process.stderr.write(`[config] debug log → ${cfg.debugLogPath}\n`);
+}
 
 /** Mutable current branch — updated by the watcher on branch switch. */
 let _currentBranch = "default";

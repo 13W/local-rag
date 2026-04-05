@@ -2,7 +2,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { cfg } from "./config.js";
 import { qd, colName } from "./qdrant.js";
 import { embedOne } from "./embedder.js";
-import { contentHash, nowIso, logHeadlessDecision, buildValidationRequests } from "./util.js";
+import { contentHash, nowIso, logHeadlessDecision, buildValidationRequests, debugLog } from "./util.js";
 import { runRouter, type RouterOp } from "./router.js";
 import type { SessionType } from "./types.js";
 
@@ -227,10 +227,14 @@ export async function runHookRemember(): Promise<void> {
     if (lines.length === 0) return;
 
     const { sessionType, agentId } = detectSessionType(input as HookInput, lines);
+    debugLog("hook-remember", `sessionType=${sessionType} agentId=${agentId} sessionId=${sessionId}`);
+
     const window        = buildWindow(lines);
     if (!window.trim()) return;
+    debugLog("hook-remember", `window chars=${window.length} lines=${lines.length}`);
 
     const ops = await runRouter(window);
+    debugLog("hook-remember", `router ops=${ops.length}`);
     if (ops.length === 0) return;
 
     const col       = colName(sessionType === "multi_agent" ? "memory_agents" : "memory");
@@ -243,28 +247,37 @@ export async function runHookRemember(): Promise<void> {
     for (const op of ops) {
       if (op.confidence >= threshold) {
         directOps.push(op);
+        debugLog("hook-remember", `op band=direct conf=${op.confidence.toFixed(2)} status=${op.status} text="${op.text.slice(0, 80)}"`);
       } else if (op.confidence >= VALIDATION_MIN_CONFIDENCE && sessionType !== "headless") {
         validationOps.push(op);
+        debugLog("hook-remember", `op band=validation conf=${op.confidence.toFixed(2)} status=${op.status} text="${op.text.slice(0, 80)}"`);
       } else if (sessionType === "headless") {
         // Log ops that didn't meet the headless threshold.
         logHeadlessDecision(cwd, op, /* written= */ false);
+        debugLog("hook-remember", `op band=discard(headless) conf=${op.confidence.toFixed(2)} status=${op.status}`);
       } else {
         // Non-headless ops below VALIDATION_MIN_CONFIDENCE: silently discard.
         // (Too low confidence to bother Claude with validation.)
+        debugLog("hook-remember", `op band=discard conf=${op.confidence.toFixed(2)} status=${op.status}`);
       }
     }
 
     // Write high-confidence ops directly.
     for (const op of directOps) {
+      let ok = true;
       await processOp(op, col, sessionType, sessionId, agentId, cwd, threshold).catch((err: unknown) => {
+        ok = false;
         process.stderr.write(`[hook-remember] op failed: ${String(err)}\n`);
+        debugLog("hook-remember", `op failed: ${String(err)}`);
       });
+      if (ok) debugLog("hook-remember", `op written status=${op.status} conf=${op.confidence.toFixed(2)}`);
     }
 
     // Emit systemMessage for validation candidates (non-headless only).
     const systemMessage = buildValidationRequests(validationOps);
     if (systemMessage) {
       process.stdout.write(JSON.stringify({ systemMessage }) + "\n");
+      debugLog("hook-remember", `emitting validation request for ${validationOps.length} ops`);
     }
   } catch (err: unknown) {
     process.stderr.write(`[hook-remember] ${String(err)}\n`);

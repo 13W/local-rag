@@ -14,6 +14,7 @@ import { record, startDashboard, broadcastShutdown, broadcastError, startReindex
 import { CodeIndexer }  from "./indexer/indexer.js";
 import { startWatcher } from "./indexer/watcher.js";
 import { cfg, setCurrentBranch } from "./config.js";
+import { debugLog } from "./util.js";
 import { getCurrentBranch, isGitRepo, loadGitState, saveGitState } from "./indexer/git.js";
 import { rememberTool }         from "./tools/remember.js";
 import { recallTool }           from "./tools/recall.js";
@@ -427,6 +428,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const bytesIn = JSON.stringify(a).length;
   const t0 = Date.now();
 
+  debugLog("server", `tool=${name} args=${JSON.stringify(a).slice(0, 200)}`);
+
   try {
     // 1. Validate tool exists
     const tool = TOOL_MAP.get(name);
@@ -440,11 +443,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     // 3. Execute
     const text = await dispatchTool(name, a);
-    record(name, "mcp", bytesIn, text.length, Date.now() - t0, true);
+    const elapsed = Date.now() - t0;
+    record(name, "mcp", bytesIn, text.length, elapsed, true);
+    debugLog("server", `tool=${name} done bytes_out=${text.length} ms=${elapsed}`);
     return { content: [{ type: "text" as const, text }] };
   } catch (err) {
     const errStr = err instanceof Error ? (err.stack ?? err.message) : String(err);
-    record(name, "mcp", bytesIn, 0, Date.now() - t0, false, errStr);
+    const elapsed = Date.now() - t0;
+    record(name, "mcp", bytesIn, 0, elapsed, false, errStr);
+    debugLog("server", `tool=${name} error ms=${elapsed} ${errStr.slice(0, 200)}`);
     if (err instanceof McpError) throw err;
     throw new McpError(ErrorCode.InternalError, err instanceof Error ? err.message : String(err));
   }

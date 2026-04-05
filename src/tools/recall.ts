@@ -3,7 +3,7 @@ import { qd } from "../qdrant.js";
 import { incrementAccess } from "../storage.js";
 import { embedOne, llmFilter, type Candidate } from "../embedder.js";
 import { finalScore } from "../scoring.js";
-import { colForType, nowIso } from "../util.js";
+import { colForType, nowIso, debugLog } from "../util.js";
 
 export interface RecallArgs {
   query:         string;
@@ -17,6 +17,7 @@ export interface RecallArgs {
 }
 
 export async function recallTool(a: RecallArgs): Promise<string> {
+  debugLog("recall", `query="${a.query.slice(0, 100)}" type=${a.memory_type || "all"} min_relevance=${a.min_relevance} llm_filter=${a.llm_filter}`);
   const embedding = await embedOne(a.query);
 
   const memTypes: string[] =
@@ -51,6 +52,16 @@ export async function recallTool(a: RecallArgs): Promise<string> {
   );
 
   const colResults = await Promise.all(colSearches);
+  debugLog("recall", `searched collections: ${collections.join(", ")}`);
+  for (let ci = 0; ci < memTypes.length; ci++) {
+    const hits = colResults[ci]!;
+    debugLog("recall", `  ${collections[ci]} → ${hits.length} hits`);
+    for (const hit of hits) {
+      const p    = (hit.payload ?? {}) as Record<string, unknown>;
+      const text = String(p["content"] ?? "").slice(0, 80);
+      debugLog("recall", `    score=${hit.score.toFixed(3)} "${text}"`);
+    }
+  }
 
   const reqTags = a.tags
     ? new Set(a.tags.split(",").map((t) => t.trim()).filter(Boolean))
@@ -96,8 +107,11 @@ export async function recallTool(a: RecallArgs): Promise<string> {
   results.sort((a, b) => b[0] - a[0]);
   let limited = results.slice(0, a.limit);
 
+  debugLog("recall", `after merge+filter: ${results.length} candidates, returning top ${limited.length}`);
   if (a.llm_filter && limited.length > 0) {
+    const before = limited.length;
     limited = await llmFilter(a.query, limited).catch(() => limited);
+    debugLog("recall", `llm_filter: ${before} → ${limited.length}`);
   }
 
   if (limited.length === 0) return "nothing found.";

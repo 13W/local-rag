@@ -103,6 +103,21 @@ export function buildValidationRequests(ops: RouterOp[]): string | null {
 }
 
 /**
+ * Append one verbose log line to cfg.debugLogPath when debug logging is enabled.
+ * Errors are suppressed — logging must never block execution.
+ */
+export function debugLog(module: string, msg: string): void {
+  if (!cfg.debugLogPath) return;
+  try {
+    const ts   = new Date().toISOString();
+    const line = `${ts}  [${module}]  ${msg}\n`;
+    appendFileSync(cfg.debugLogPath, line, "utf8");
+  } catch {
+    // intentionally silent
+  }
+}
+
+/**
  * Append one line to {cwd}/.memory-headless.log describing a headless-session
  * write/skip decision. Errors are suppressed — logging must never block the hook.
  */
