@@ -3,8 +3,8 @@
  * Provider calling is delegated to llm-client.ts.
  */
 
-import { cfg, type RouterProviderSpec } from "./config.js";
-import { callLlmSimple } from "./llm-client.js";
+import { cfg } from "./config.js";
+import { callLlmSimple, defaultRouterSpec } from "./llm-client.js";
 import { debugLog } from "./util.js";
 import type { Status } from "./types.js";
 
@@ -62,22 +62,12 @@ function parseOps(raw: string): RouterOp[] {
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
-/** Build a RouterProviderSpec from the existing llm-* config keys. */
-function defaultSpec(): RouterProviderSpec {
-  return {
-    provider: cfg.llmProvider as RouterProviderSpec["provider"],
-    model:    cfg.llmModel,
-    api_key:  cfg.llmApiKey || undefined,
-    url:      cfg.llmUrl    || undefined,
-  };
-}
-
 /**
  * Run the LLM router on a transcript window.
  * Returns extracted memory operations. Returns [] on any error.
  */
 export async function runRouter(window: string): Promise<RouterOp[]> {
-  const primarySpec  = cfg.routerConfig ?? defaultSpec();
+  const primarySpec  = cfg.routerConfig ?? defaultRouterSpec();
   const fallbackSpec = cfg.routerConfig?.fallback ?? null;
   const prompt       = ROUTER_PROMPT + window;
 

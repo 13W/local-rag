@@ -37,6 +37,16 @@ export function resolveBaseUrl(spec: RouterProviderSpec): string {
   }
 }
 
+/** Build a RouterProviderSpec from the global llm-* config keys (fallback when no router block). */
+export function defaultRouterSpec(): RouterProviderSpec {
+  return {
+    provider: cfg.llmProvider as RouterProviderSpec["provider"],
+    model:    cfg.llmModel,
+    api_key:  cfg.llmApiKey || undefined,
+    url:      cfg.llmUrl    || undefined,
+  };
+}
+
 // ── Simple call (no tools) ────────────────────────────────────────────────────
 
 /**

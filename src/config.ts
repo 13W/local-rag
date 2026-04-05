@@ -102,13 +102,14 @@ function bool(key: keyof ConfigFile & string, fallback: boolean): boolean {
 }
 
 const embedProvider = str("embed-provider", "ollama") as "ollama" | "openai" | "voyage";
-const llmProvider   = str("llm-provider",   "ollama") as "ollama" | "anthropic" | "openai";
+const llmProvider   = str("llm-provider",   "ollama") as "ollama" | "anthropic" | "openai" | "gemini";
 
 const embedApiKeyEnv = embedProvider === "openai"    ? process.env.OPENAI_API_KEY
                      : embedProvider === "voyage"    ? process.env.VOYAGE_API_KEY
                      : undefined;
 const llmApiKeyEnv   = llmProvider   === "anthropic" ? process.env.ANTHROPIC_API_KEY
                      : llmProvider   === "openai"    ? process.env.OPENAI_API_KEY
+                     : llmProvider   === "gemini"    ? (process.env.GEMINI_API_KEY ?? process.env.GOOGLE_API_KEY)
                      : undefined;
 
 const EMBED_MODEL_DEFAULT: Record<string, string> = {
@@ -120,6 +121,7 @@ const LLM_MODEL_DEFAULT: Record<string, string> = {
   ollama:    "gemma3n:e2b",
   anthropic: "claude-haiku-4-5-20251001",
   openai:    "gpt-4o-mini",
+  gemini:    "gemini-2.0-flash",
 };
 
 export const cfg = Object.freeze({

@@ -9,10 +9,10 @@
  *   executes the search, returns the LLM's final text to inject as systemMessage.
  */
 
-import { cfg, type RouterProviderSpec } from "./config.js";
+import { cfg } from "./config.js";
 import { qd, colName } from "./qdrant.js";
 import { embedOne } from "./embedder.js";
-import { callLlmSimple, callLlmWithTools, type ToolDef } from "./llm-client.js";
+import { callLlmSimple, callLlmWithTools, defaultRouterSpec, type ToolDef } from "./llm-client.js";
 import { debugLog } from "./util.js";
 import { createHash } from "node:crypto";
 
@@ -72,15 +72,6 @@ const SEARCH_MEMORY_TOOL: ToolDef = {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function _defaultSpec(): RouterProviderSpec {
-  return {
-    provider: cfg.llmProvider as RouterProviderSpec["provider"],
-    model:    cfg.llmModel,
-    api_key:  cfg.llmApiKey || undefined,
-    url:      cfg.llmUrl    || undefined,
-  };
-}
-
 // ── Project profile ───────────────────────────────────────────────────────────
 
 async function _loadProfile(): Promise<ProjectProfile | null> {
@@ -136,7 +127,7 @@ export async function buildProjectProfile(): Promise<void> {
   }
 
   type ScrollPt = { payload?: Record<string, unknown> };
-  const collectionBases = ["memory", "memory_episodic", "memory_semantic"];
+  const collectionBases = ["memory", "memory_episodic", "memory_semantic", "memory_procedural"];
   const samples: string[]                 = [];
   const tagCounts: Record<string, number> = {};
   const stats: Record<string, number>     = {};
@@ -172,7 +163,7 @@ export async function buildProjectProfile(): Promise<void> {
 
   let topTopics: string[] = topTags.slice(0, 10);
 
-  const spec = cfg.routerConfig ?? _defaultSpec();
+  const spec = cfg.routerConfig ?? defaultRouterSpec();
   const topicsPrompt =
     "Extract 10 key topics and domain terms from these project memory entries.\n" +
     "Output a JSON array of strings only. No explanation.\n\n" +
@@ -313,7 +304,7 @@ export async function runArchivist(prompt: string): Promise<string> {
   debugLog("archivist", `profile=${profile ? "loaded" : "missing"}`);
 
   const systemPrompt = _buildSystemPrompt(profile);
-  const spec         = cfg.routerConfig ?? _defaultSpec();
+  const spec         = cfg.routerConfig ?? defaultRouterSpec();
 
   try {
     const result = await callLlmWithTools(
