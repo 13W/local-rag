@@ -1,6 +1,6 @@
 import { readdirSync, lstatSync, readFileSync, existsSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { cfg, getCurrentBranchCached } from "../config.js";
+import { cfg, getProjectId, getCurrentBranchCached } from "../config.js";
 import { qd, colName } from "../qdrant.js";
 import { topFilesByRevDeps } from "../storage.js";
 
@@ -135,7 +135,7 @@ async function getAllIndexedFilePaths(): Promise<string[]> {
     const result = await qd
       .scroll(colName("code_chunks"), {
         filter: { must: [
-          { key: "project_id", match: { value: cfg.projectId } },
+          { key: "project_id", match: { value: getProjectId() } },
           { key: "branches",   match: { value: getCurrentBranchCached() } },
         ] },
         limit:        500,
@@ -170,7 +170,7 @@ export async function projectOverviewTool(): Promise<string> {
   ]);
 
   // Top files by reverse-dep count
-  const topFiles = await topFilesByRevDeps(cfg.projectId, allFiles, 10).catch(() => []);
+  const topFiles = await topFilesByRevDeps(getProjectId(), allFiles, 10).catch(() => []);
 
   const lines: string[] = [
     `# Project Overview: ${root}`,

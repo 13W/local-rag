@@ -1,4 +1,4 @@
-import { cfg } from "../config.js";
+import { getProjectId } from "../config.js";
 import { qd } from "../qdrant.js";
 import { incrementAccess } from "../storage.js";
 import { embedOne, llmFilter, type Candidate } from "../embedder.js";
@@ -29,7 +29,7 @@ export async function recallTool(a: RecallArgs): Promise<string> {
   const collections = memTypes.map(colForType);
 
   const mustFilters: Array<{ key: string; match: { value: string } }> = [
-    { key: "project_id", match: { value: cfg.projectId } },
+    { key: "project_id", match: { value: getProjectId() } },
   ];
   if (a.scope) {
     mustFilters.push({ key: "scope", match: { value: a.scope } });
@@ -94,7 +94,7 @@ export async function recallTool(a: RecallArgs): Promise<string> {
       if (score < a.min_relevance) continue;
 
       // Fire-and-forget; never let Redis errors surface as tool failures.
-      incrementAccess(String(hit.id), cfg.projectId, mt, now).catch(() => undefined);
+      incrementAccess(String(hit.id), getProjectId(), mt, now).catch(() => undefined);
 
       const tagStr = Array.isArray(p["tags"])
         ? (p["tags"] as string[]).map((t) => `#${t}`).join(" ")

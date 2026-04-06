@@ -1,4 +1,4 @@
-import { cfg } from "../config.js";
+import { getProjectId } from "../config.js";
 import { qd } from "../qdrant.js";
 import { deleteById } from "../storage.js";
 import { storeMemory, colForType } from "../util.js";
@@ -24,7 +24,7 @@ export async function consolidateTool(a: ConsolidateArgs): Promise<string> {
 
   const { points } = await qd.scroll(srcCol, {
     filter: {
-      must: [{ key: "project_id", match: { value: cfg.projectId } }],
+      must: [{ key: "project_id", match: { value: getProjectId() } }],
     },
     limit:        500,
     with_vector: true,

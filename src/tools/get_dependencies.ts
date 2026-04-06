@@ -1,4 +1,4 @@
-import { cfg } from "../config.js";
+import { getProjectId } from "../config.js";
 import { getDeps, getReverseDeps, getTransitiveDeps } from "../storage.js";
 
 export interface GetDependenciesArgs {
@@ -17,7 +17,7 @@ export async function getDependenciesTool(a: GetDependenciesArgs): Promise<strin
 
   if (direction === "imports" || direction === "both") {
     if (depth === 1) {
-      const deps = await getDeps(cfg.projectId, a.file_path);
+      const deps = await getDeps(getProjectId(), a.file_path);
       lines.push(`Imports (${deps.length}):`);
       if (deps.length === 0) {
         lines.push("  (none)");
@@ -25,7 +25,7 @@ export async function getDependenciesTool(a: GetDependenciesArgs): Promise<strin
         for (const d of deps) lines.push(`  → ${d}`);
       }
     } else {
-      const depMap = await getTransitiveDeps(cfg.projectId, a.file_path, depth, "imports");
+      const depMap = await getTransitiveDeps(getProjectId(), a.file_path, depth, "imports");
       lines.push(`Transitive imports (depth ≤${depth}, ${depMap.size} files):`);
       if (depMap.size === 0) {
         lines.push("  (none)");
@@ -40,7 +40,7 @@ export async function getDependenciesTool(a: GetDependenciesArgs): Promise<strin
 
   if (direction === "imported_by" || direction === "both") {
     if (depth === 1) {
-      const revDeps = await getReverseDeps(cfg.projectId, a.file_path);
+      const revDeps = await getReverseDeps(getProjectId(), a.file_path);
       lines.push(`Imported by (${revDeps.length}):`);
       if (revDeps.length === 0) {
         lines.push("  (none)");
@@ -48,7 +48,7 @@ export async function getDependenciesTool(a: GetDependenciesArgs): Promise<strin
         for (const d of revDeps) lines.push(`  ← ${d}`);
       }
     } else {
-      const depMap = await getTransitiveDeps(cfg.projectId, a.file_path, depth, "imported_by");
+      const depMap = await getTransitiveDeps(getProjectId(), a.file_path, depth, "imported_by");
       lines.push(`Transitive importers (depth ≤${depth}, ${depMap.size} files):`);
       if (depMap.size === 0) {
         lines.push("  (none)");

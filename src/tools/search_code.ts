@@ -1,6 +1,6 @@
 import { qd, CODE_VECTORS, colName } from "../qdrant.js";
 import { embedOne } from "../embedder.js";
-import { cfg, getCurrentBranchCached } from "../config.js";
+import { cfg, getProjectId, getCurrentBranchCached } from "../config.js";
 import { rerank as rerankHits } from "../reranker.js";
 import type { Schemas } from "@qdrant/js-client-rest";
 
@@ -24,7 +24,7 @@ export async function searchCodeTool(a: SearchCodeArgs): Promise<string> {
 
   const branchFilter = a.branch || getCurrentBranchCached();
   const must: Array<{ key: string; match: { value: string } | { text: string } }> = [
-    { key: "project_id", match: { value: cfg.projectId } },
+    { key: "project_id", match: { value: getProjectId() } },
     { key: "branches",   match: { value: branchFilter  } },
   ];
   // match: { text } without a full-text index performs exact substring matching in Qdrant
