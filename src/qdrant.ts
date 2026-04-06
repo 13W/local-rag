@@ -142,4 +142,10 @@ export async function ensureCollections(): Promise<void> {
 
   await ensureNewMemoryCollections(existing);
   await ensureCodeChunks();
+
+  // hook_calls — payload-only collection (vector size 1, dummy float)
+  if (!existing.has(colName("hook_calls"))) {
+    await qd.createCollection(colName("hook_calls"), { vectors: { size: 1, distance: "Cosine" } });
+    process.stderr.write(`[qdrant] Created collection: ${colName("hook_calls")}\n`);
+  }
 }
