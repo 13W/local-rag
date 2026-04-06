@@ -30,7 +30,7 @@ interface ToolStats {
 interface RequestEntry {
   ts:       number;
   tool:     string;
-  source:   "mcp" | "playground" | "watcher";
+  source:   "mcp" | "playground" | "watcher" | "hook";
   bytesIn:  number;
   bytesOut: number;
   ms:       number;
@@ -104,7 +104,7 @@ function statsSnapshot(): Record<string, unknown> {
   return out;
 }
 
-export function record(tool: string, source: "mcp" | "playground", bytesIn: number, bytesOut: number, ms: number, ok: boolean, error?: string): void {
+export function record(tool: string, source: "mcp" | "playground" | "hook", bytesIn: number, bytesOut: number, ms: number, ok: boolean, error?: string): void {
   const prev = toolStats.get(tool) ?? { calls: 0, bytesIn: 0, bytesOut: 0, totalMs: 0, errors: 0 };
   toolStats.set(tool, {
     calls:    prev.calls    + 1,

@@ -103,7 +103,7 @@ export async function hooksPlugin(fastify: FastifyInstance): Promise<void> {
 
       const ms       = Date.now() - t0;
       const bytesOut = JSON.stringify({ systemMessage }).length;
-      record("hooks/recall", "mcp", bytesIn, bytesOut, ms, true);
+      record("hooks/recall", "hook", bytesIn, bytesOut, ms, true);
 
       await persistHookCall("recall", sessionId, projectId, {
         prompt_chars: prompt.length,
@@ -113,7 +113,7 @@ export async function hooksPlugin(fastify: FastifyInstance): Promise<void> {
       return reply.send({ systemMessage });
     } catch (err: unknown) {
       const ms = Date.now() - t0;
-      record("hooks/recall", "mcp", bytesIn, 0, ms, false, String(err));
+      record("hooks/recall", "hook", bytesIn, 0, ms, false, String(err));
       debugLog("hooks/recall", `error: ${String(err)}`);
       return reply.code(500).send({ error: String(err) });
     }
@@ -138,7 +138,7 @@ export async function hooksPlugin(fastify: FastifyInstance): Promise<void> {
       const window = buildTranscriptContext(transcriptPath, 8_000);
       if (!window.trim()) {
         const ms = Date.now() - t0;
-        record("hooks/remember", "mcp", bytesIn, 2, ms, true);
+        record("hooks/remember", "hook", bytesIn, 2, ms, true);
         return reply.send({ systemMessage: "" });
       }
 
@@ -177,7 +177,7 @@ export async function hooksPlugin(fastify: FastifyInstance): Promise<void> {
 
       const ms       = Date.now() - t0;
       const bytesOut = JSON.stringify({ systemMessage }).length;
-      record("hooks/remember", "mcp", bytesIn, bytesOut, ms, true);
+      record("hooks/remember", "hook", bytesIn, bytesOut, ms, true);
 
       await persistHookCall("remember", sessionId, projectId, {
         ops_total:      ops.length,
@@ -188,7 +188,7 @@ export async function hooksPlugin(fastify: FastifyInstance): Promise<void> {
       return reply.send({ systemMessage });
     } catch (err: unknown) {
       const ms = Date.now() - t0;
-      record("hooks/remember", "mcp", bytesIn, 0, ms, false, String(err));
+      record("hooks/remember", "hook", bytesIn, 0, ms, false, String(err));
       debugLog("hooks/remember", `error: ${String(err)}`);
       return reply.code(500).send({ error: String(err) });
     }
