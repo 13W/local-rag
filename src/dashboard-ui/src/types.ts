@@ -9,15 +9,26 @@ export interface ToolStats {
 }
 
 export interface RequestEntry {
-  ts:       number;
-  tool:     string;
-  source:   "mcp" | "playground" | "watcher";
-  bytesIn:  number;
-  bytesOut: number;
-  ms:       number;
-  ok:       boolean;
-  chunks?:  number;
-  error?:   string;
+  ts:        number;
+  tool:      string;
+  source:    "mcp" | "playground" | "watcher" | "hook";
+  bytesIn:   number;
+  bytesOut:  number;
+  ms:        number;
+  ok:        boolean;
+  chunks?:   number;
+  error?:    string;
+  // hook-only
+  hook_type?:  "recall" | "remember";
+  session_id?: string;
+  project_id?: string;
+  agent_id?:   string;
+  found?:      number;
+  summary?:    string;
+  written?:    number;
+  validated?:  number;
+  discarded?:  number;
+  facts?:      string[];
 }
 
 export interface PropSchema {
