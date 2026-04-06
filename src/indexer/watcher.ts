@@ -4,7 +4,7 @@ import { resolve, relative, join } from "node:path";
 import type { CodeIndexer } from "./indexer.js";
 import { GitignoreFilter } from "./gitignore.js";
 import { cfg } from "../config.js";
-import { recordIndex, broadcastBranchSwitch } from "../dashboard.js";
+import { recordIndex, broadcastBranchSwitch } from "../plugins/dashboard.js";
 import { getCurrentBranch, getGitHeadPath, saveGitState } from "./git.js";
 import { setCurrentBranch } from "../config.js";
 
