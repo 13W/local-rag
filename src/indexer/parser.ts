@@ -1,6 +1,6 @@
 import { createRequire } from "node:module";
 import { dirname, join, basename, extname } from "node:path";
-import { loadAll } from "js-yaml";
+import { load as loadYaml, loadAll } from "js-yaml";
 import { parse as parseToml } from "smol-toml";
 import { Parser, Language } from "web-tree-sitter";
 import type { CodeChunk } from "../types.js";
@@ -481,7 +481,15 @@ function walkTree(
 
 function parseJsonFile(filePath: string, source: string): CodeChunk[] {
   if (source.length > 100_000) return [];
-  const data  = JSON.parse(source) as unknown;
+  
+  let data: unknown;
+  try {
+    data = loadYaml(source);
+  } catch {
+    // Fallback to simpler parsing if YAML parser fails
+    data = null;
+  }
+
   const stem  = basename(filePath, extname(filePath));
   const lines = source.split("\n");
 

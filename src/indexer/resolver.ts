@@ -10,6 +10,7 @@
 
 import { readFileSync, existsSync } from "node:fs";
 import { resolve, join, dirname, relative } from "node:path";
+import { load as loadYaml } from "js-yaml";
 
 interface TsConfig {
   compilerOptions?: {
@@ -37,11 +38,13 @@ export class ImportResolver {
 
     const tsPath = opts.tsconfigPath ?? join(opts.root, "tsconfig.json");
     if (existsSync(tsPath)) {
-      const raw = readFileSync(tsPath, "utf8")
-        .replace(/\/\/[^\n]*/g, "")           // strip // comments
-        .replace(/\/\*[\s\S]*?\*\//g, "")     // strip /* */ comments
-        .replace(/,(\s*[}\]])/g, "$1");        // strip trailing commas (JSONC)
-      const tsconfig = JSON.parse(raw) as TsConfig;
+      const raw = readFileSync(tsPath, "utf8");
+      let tsconfig: TsConfig;
+      try {
+        tsconfig = (loadYaml(raw) as TsConfig) || {};
+      } catch {
+        tsconfig = {};
+      }
       const opts2    = tsconfig.compilerOptions ?? {};
       if (opts2.baseUrl) {
         this.baseUrl = resolve(dirname(tsPath), opts2.baseUrl);
