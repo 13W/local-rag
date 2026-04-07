@@ -106,12 +106,12 @@ export const TOOLS = [
   },
   {
     name: "consolidate",
-    description: "Consolidate similar memories (like sleep for the brain).\n\nArgs:\n  source: Source memory type\n  target: Target memory type for merged records\n  similarity_threshold: Cosine similarity threshold (0.0-1.0)\n  dry_run: True = preview only, False = execute",
+    description: "Consolidate similar memories (like sleep for the brain).\\n\\nArgs:\\n  source: Source memory type\\n  target: Target memory type for merged records\\n  similarity_threshold: Cosine similarity threshold (0.0-1.0)\\n  dry_run: True = preview only, False = execute",
     inputSchema: {
       type: "object" as const,
       properties: {
-        source:               { type: "string",  description: "episodic | semantic | procedural", default: "episodic", enum: ["episodic", "semantic", "procedural"] },
-        target:               { type: "string",  description: "episodic | semantic | procedural", default: "semantic", enum: ["episodic", "semantic", "procedural"] },
+        source:               { type: "string",  description: "episodic | semantic | procedural | memory | memory_agents", default: "episodic", enum: ["episodic", "semantic", "procedural", "memory", "memory_agents"] },
+        target:               { type: "string",  description: "episodic | semantic | procedural | memory | memory_agents", default: "semantic", enum: ["episodic", "semantic", "procedural", "memory", "memory_agents"] },
         similarity_threshold: { type: "number",  description: "Cosine similarity threshold 0.0–1.0", default: 0.85 },
         dry_run:              { type: "boolean", description: "Preview without executing", default: true },
       },

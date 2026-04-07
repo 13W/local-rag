@@ -10,6 +10,8 @@ import { broadcastMemoryUpdate } from "./plugins/dashboard.js";
 import { getProjectId, getAgentId } from  './request-context.js'
 
 export function colForType(memoryType: string): string {
+  if (memoryType === "memory") return colName("memory");
+  if (memoryType === "memory_agents") return colName("memory_agents");
   return colName(`memory_${memoryType}`);
 }
 

@@ -36,6 +36,8 @@ export async function consolidateTool(a: ConsolidateArgs): Promise<string> {
   const srcCol = colForType(a.source);
   const projectId = getProjectId();
 
+  debugLog("consolidate", `Consolidating from collection: ${srcCol}`);
+
   const { points } = await qd.scroll(srcCol, {
     filter: {
       must: [{ key: "project_id", match: { value: projectId } }],
@@ -133,7 +135,7 @@ export async function consolidateTool(a: ConsolidateArgs): Promise<string> {
         content:    synthesizedText,
         memoryType: a.target as MemoryType,
         scope:      "project" as ScopeType,
-        status:     (synthesizedStatus as any) || (a.target === "semantic" ? "resolved" : "observation"),
+        status:     (synthesizedStatus as any) || (a.target === "semantic" || a.target === "memory" ? "resolved" : "observation"),
         tags:       uniqueTags.join(","),
         importance: Math.min(maxImp + 0.1, 1.0),
         ttlHours:   0,
