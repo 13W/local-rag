@@ -91,6 +91,7 @@ export interface InitData {
   log:        RequestEntry[];
   schemas:    ToolSchemaDef[];
   serverInfo: ServerInfo;
+  projects:   ProjectConfigData[];
 }
 
 export interface EmbedConfigData {

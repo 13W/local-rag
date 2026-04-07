@@ -1,5 +1,5 @@
 import { Injectable, OnDestroy, signal } from "@angular/core";
-import type { InitData, ProcessError, ReindexProgress, RequestEntry, ServerInfo, ToolStats, OverviewData } from "../../types";
+import type { InitData, ProcessError, ReindexProgress, RequestEntry, ServerInfo, ToolStats, OverviewData, ProjectConfigData } from "../../types";
 
 const LOG_MAX = 500;
 
@@ -12,6 +12,7 @@ export class SseService implements OnDestroy {
   readonly reindex    = signal<ReindexProgress | null>(null);
   readonly serverInfo = signal<ServerInfo | null>(null);
   readonly memory     = signal<OverviewData | null>(null);
+  readonly projects   = signal<ProjectConfigData[]>([]);
 
   private es: EventSource | null = null;
 
@@ -19,6 +20,7 @@ export class SseService implements OnDestroy {
     this.stats.set(init.stats);
     this.log.set([...init.log].reverse());
     this.serverInfo.set(init.serverInfo);
+    this.projects.set(init.projects);
 
     this.es = new EventSource("/events");
     this.es.onmessage = ({ data }: MessageEvent<string>) => {
@@ -34,8 +36,9 @@ export class SseService implements OnDestroy {
         this.status.set("connected");
         this.stats.set(msg.stats);
         this.log.set([...msg.log].reverse());
-        const initMsg = msg as typeof msg & { reindex?: ReindexProgress | null };
+        const initMsg = msg as typeof msg & { reindex?: ReindexProgress | null; projects?: ProjectConfigData[] };
         this.reindex.set(initMsg.reindex ?? null);
+        if (initMsg.projects) this.projects.set(initMsg.projects);
       }
       if (msg.type === "entry") {
         this.stats.set(msg.stats);

@@ -117,7 +117,16 @@ export async function loadProjectConfig(qd: QdrantClient, projectId: string): Pr
 }
 
 export async function upsertProjectConfig(qd: QdrantClient, proj: ProjectConfig): Promise<void> {
-  const id = Math.abs(proj.project_id.split("").reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 0)) || 1;
+  // 1. Try to find existing point ID for this project_id
+  const result = await qd.scroll(PROJECTS_COL, {
+    filter: { must: [{ key: "project_id", match: { value: proj.project_id } }] },
+    limit: 1, with_payload: false,
+  }).catch(() => ({ points: [] as { id: string | number }[] }));
+
+  // 2. Use existing ID if found, otherwise generate a deterministic numeric hash ID
+  const id = result.points[0]?.id ??
+    (Math.abs(proj.project_id.split("").reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 0)) || 1);
+
   await qd.upsert(PROJECTS_COL, {
     wait: true,
     points: [{ id, vector: [0], payload: { ...proj, updated_at: new Date().toISOString() } }],

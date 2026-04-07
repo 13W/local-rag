@@ -1,4 +1,4 @@
-import { Component, OnInit, signal, effect, inject } from "@angular/core";
+import { Component, OnInit, signal, effect, inject, input } from "@angular/core";
 import { SseService } from "../services/sse.service";
 import type { MemoryEntry, OverviewData } from "../../types";
 
@@ -27,6 +27,8 @@ interface SessionEntry {
 export class MemoryComponent implements OnInit {
   private readonly sse = inject(SseService);
 
+  readonly projectId = input<string>("");
+
   readonly overview        = signal<OverviewData | null>(null);
   readonly searchQuery     = signal("");
   readonly searchResults   = signal<SearchResult[]>([]);
@@ -46,13 +48,27 @@ export class MemoryComponent implements OnInit {
         this._fetchByStatus(this.selectedStatuses());
       }
     });
+
+    effect(() => {
+      const pid = this.projectId();
+      if (pid !== undefined) {
+        this.fetchOverview();
+      }
+    }, { allowSignalWrites: true });
   }
 
   ngOnInit(): void {
-    void fetch("/api/memory/overview")
+    // Initial fetch handled by effect
+  }
+
+  private fetchOverview(): void {
+    this.loading.set(true);
+    const pid = this.projectId();
+    const url = `/api/memory/overview${pid ? `?project_id=${encodeURIComponent(pid)}` : ""}`;
+    void fetch(url)
       .then(r => r.json() as Promise<OverviewData>)
       .then(data => {
-        if (!this.overview()) this.overview.set(data);
+        this.overview.set(data);
         this.loading.set(false);
       })
       .catch(() => { this.loading.set(false); });
@@ -76,7 +92,9 @@ export class MemoryComponent implements OnInit {
   private _fetchByStatus(statuses: ReadonlySet<string>): void {
     this.filterLoading.set(true);
     const param = [...statuses].join(",");
-    void fetch(`/api/memory/by-status?status=${encodeURIComponent(param)}`)
+    const pid = this.projectId();
+    const url = `/api/memory/by-status?status=${encodeURIComponent(param)}${pid ? `&project_id=${encodeURIComponent(pid)}` : ""}`;
+    void fetch(url)
       .then(r => r.json() as Promise<{ entries: MemoryEntry[] }>)
       .then(data => { this.filteredEntries.set(data.entries); this.filterLoading.set(false); })
       .catch(() => { this.filterLoading.set(false); });
@@ -90,7 +108,9 @@ export class MemoryComponent implements OnInit {
     const q = this.searchQuery().trim();
     if (!q) { this.searchResults.set([]); return; }
     this.searching.set(true);
-    void fetch(`/api/memory/search?q=${encodeURIComponent(q)}`)
+    const pid = this.projectId();
+    const url = `/api/memory/search?q=${encodeURIComponent(q)}${pid ? `&project_id=${encodeURIComponent(pid)}` : ""}`;
+    void fetch(url)
       .then(r => r.json() as Promise<{ results: SearchResult[] }>)
       .then(data => { this.searchResults.set(data.results); this.searching.set(false); })
       .catch(() => { this.searching.set(false); });

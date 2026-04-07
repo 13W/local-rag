@@ -6,7 +6,8 @@ import type { RouterOp } from "./router.js";
 import { cfg } from "./config.js";
 import { qd, colName } from "./qdrant.js";
 import { embedOne } from "./embedder.js";
-import { broadcastMemoryUpdate } from "./dashboard.js";
+import { broadcastMemoryUpdate } from "./plugins/dashboard.js";
+import { getProjectId, getAgentId } from  './request-context.js'
 
 export function colForType(memoryType: string): string {
   return colName(`memory_${memoryType}`);
@@ -34,7 +35,7 @@ export async function storeMemory(params: StoreMemoryParams): Promise<string> {
     filter: {
       must: [
         { key: "content_hash", match: { value: hash } },
-        { key: "project_id",   match: { value: cfg.projectId } },
+        { key: "project_id",   match: { value: getProjectId() } },
       ],
     },
     limit: 1,
@@ -62,8 +63,8 @@ export async function storeMemory(params: StoreMemoryParams): Promise<string> {
         vector:  embedding,
         payload: {
           content,
-          agent_id:     cfg.agentId,
-          project_id:   cfg.projectId,
+          agent_id:     getAgentId(),
+          project_id:   getProjectId(),
           memory_type:  memoryType,
           scope,
           importance,
@@ -227,7 +228,9 @@ export function debugLog(module: string, msg: string): void {
   if (!cfg.debugLogPath) return;
   try {
     const ts   = new Date().toISOString();
-    const line = `${ts}  [${module}]  ${msg}\n`;
+    const pid  = getProjectId();
+    const aid  = getAgentId();
+    const line = `${ts}  [${pid}/${aid}] [${module}]  ${msg}\n`;
     appendFileSync(cfg.debugLogPath, line, "utf8");
   } catch {
     // intentionally silent

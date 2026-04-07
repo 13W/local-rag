@@ -161,6 +161,12 @@ export function broadcastShutdown(): void {
   for (const res of new Set(sseClients)) res.write(data);
 }
 
+export function broadcastMemoryUpdate(): void {
+  if (!_active) return;
+  const data = `data: ${JSON.stringify({ type: "memory_update" })}\n\n`;
+  for (const res of new Set(sseClients)) res.write(data);
+}
+
 export function broadcastBranchSwitch(branch: string): void {
   if (!_active || !_serverInfo) return;
   _serverInfo.branch = branch;
@@ -189,8 +195,14 @@ interface MemoryEntry {
   created_at:   string;
 }
 
-async function scrollMemoryEntries(): Promise<MemoryEntry[]> {
-  const collections = [colName("memory"), colName("memory_agents")];
+async function scrollMemoryEntries(projectId?: string): Promise<MemoryEntry[]> {
+  const collections = [
+    colName("memory"),
+    colName("memory_agents"),
+    colName("memory_episodic"),
+    colName("memory_semantic"),
+    colName("memory_procedural"),
+  ];
   const allEntries: MemoryEntry[] = [];
   const seenHashes = new Set<string>();
 
@@ -198,7 +210,7 @@ async function scrollMemoryEntries(): Promise<MemoryEntry[]> {
     let offset: string | number | undefined;
     while (true) {
       const result = await qd.scroll(col, {
-        filter:       { must: [{ key: "project_id", match: { value: cfg.projectId } }] },
+        filter:       projectId ? { must: [{ key: "project_id", match: { value: projectId } }] } : undefined,
         limit:        500,
         with_payload: true,
         with_vector:  false,
@@ -207,14 +219,15 @@ async function scrollMemoryEntries(): Promise<MemoryEntry[]> {
 
       for (const pt of result.points) {
         const p    = (pt.payload ?? {}) as Record<string, unknown>;
+        const text = String(p["text"] ?? p["content"] ?? "");
         const hash = String(p["content_hash"] ?? pt.id);
         if (seenHashes.has(hash)) continue;
         seenHashes.add(hash);
         allEntries.push({
           id:           String(pt.id),
-          text:         String(p["text"] ?? ""),
+          text,
           status:       String(p["status"] ?? "resolved"),
-          confidence:   Number(p["confidence"] ?? 0),
+          confidence:   Number(p["confidence"] ?? p["importance"] ?? 0),
           session_id:   String(p["session_id"] ?? ""),
           session_type: String(p["session_type"] ?? ""),
           updated_at:   String(p["updated_at"] ?? ""),
@@ -303,26 +316,34 @@ export async function dashboardPlugin(fastify: FastifyInstance): Promise<void> {
 
   fastify.get("/", async (_req, reply) => {
     const html   = readFileSync(resolve(_uiDir, "index.html"), "utf8");
+    const { listProjectConfigs } = await import("../server-config.js");
+    const projects = await listProjectConfigs(qd);
+
     const init   = JSON.stringify({
       stats:      statsSnapshot(),
       log:        requestLog,
       schemas:    JSON.parse(_toolSchemasJson) as unknown[],
       serverInfo: JSON.parse(_serverInfoJson) as unknown,
       memory:     memStats(),
+      projects,
     });
     const inject = `<script>window.__INIT__=${init}</script>`;
     const out    = html.replace("</head>", `${inject}\n</head>`);
     return reply.header("Content-Type", "text/html; charset=utf-8").send(out);
   });
 
-  fastify.get("/events", (req, reply) => {
+  fastify.get("/events", async (req, reply) => {
     reply.hijack();
     const raw = reply.raw;
     raw.setHeader("Content-Type",  "text/event-stream");
     raw.setHeader("Cache-Control", "no-cache");
     raw.setHeader("Connection",    "keep-alive");
     raw.flushHeaders();
-    raw.write(`data: ${JSON.stringify({ type: "init", stats: statsSnapshot(), log: requestLog, reindex: _reindexProgress, memory: memStats() })}\n\n`);
+
+    const { listProjectConfigs } = await import("../server-config.js");
+    const projects = await listProjectConfigs(qd);
+
+    raw.write(`data: ${JSON.stringify({ type: "init", stats: statsSnapshot(), log: requestLog, reindex: _reindexProgress, memory: memStats(), projects })}\n\n`);
     sseClients.add(raw);
     req.raw.on("close", () => { sseClients.delete(raw); });
   });
@@ -349,8 +370,8 @@ export async function dashboardPlugin(fastify: FastifyInstance): Promise<void> {
       });
   });
 
-  fastify.get("/api/memory/overview", async () => {
-    const entries = await scrollMemoryEntries();
+  fastify.get<{ Querystring: { project_id?: string } }>("/api/memory/overview", async (req) => {
+    const entries = await scrollMemoryEntries(req.query.project_id);
 
     const statusCounts: Record<string, number> = {
       in_progress: 0, resolved: 0, open_question: 0, hypothesis: 0,
@@ -385,9 +406,9 @@ export async function dashboardPlugin(fastify: FastifyInstance): Promise<void> {
     return { statusCounts, recent, sessions };
   });
 
-  fastify.get<{ Querystring: { status?: string } }>("/api/memory/by-status", async (req) => {
+  fastify.get<{ Querystring: { status?: string; project_id?: string } }>("/api/memory/by-status", async (req) => {
     const statuses = new Set((req.query.status ?? "").split(",").map(s => s.trim()).filter(Boolean));
-    const entries  = await scrollMemoryEntries();
+    const entries  = await scrollMemoryEntries(req.query.project_id);
     const filtered = statuses.size > 0 ? entries.filter(e => statuses.has(e.status)) : entries;
     return {
       entries: filtered
@@ -396,12 +417,15 @@ export async function dashboardPlugin(fastify: FastifyInstance): Promise<void> {
     };
   });
 
-  fastify.get<{ Querystring: { q?: string } }>("/api/memory/search", async (req) => {
+  fastify.get<{ Querystring: { q?: string; project_id?: string } }>("/api/memory/search", async (req) => {
     const q = (req.query.q ?? "").trim();
     if (!q) return { results: [] };
 
     const vector    = await embedOne(q);
-    const mustFilter = [{ key: "project_id", match: { value: cfg.projectId } }];
+    const mustFilter: any[] = [];
+    if (req.query.project_id) {
+      mustFilter.push({ key: "project_id", match: { value: req.query.project_id } });
+    }
 
     type QHit = Awaited<ReturnType<typeof qd.search>>[number];
     const [memHits, agentHits] = await Promise.all([
@@ -436,9 +460,11 @@ export async function dashboardPlugin(fastify: FastifyInstance): Promise<void> {
   });
 
   fastify.post("/api/projects", async (req, reply) => {
-    const { upsertProjectConfig } = await import("../server-config.js");
+    const { upsertProjectConfig, mergeProjectConfig } = await import("../server-config.js");
     const { qd } = await import("../qdrant.js");
-    await upsertProjectConfig(qd, req.body as import("../server-config.js").ProjectConfig);
+    const body = req.body as Partial<import("../server-config.js").ProjectConfig> & { project_id: string };
+    if (!body.project_id) return reply.code(400).send({ error: "Missing project_id" });
+    await upsertProjectConfig(qd, mergeProjectConfig(body));
     return reply.code(201).send({ ok: true });
   });
 

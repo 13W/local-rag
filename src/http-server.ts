@@ -16,15 +16,20 @@ export async function startHttpServer(): Promise<void> {
   // 1. Connect to Qdrant (interactive if needed)
   await bootstrap();
 
-  // 2. Ensure all collections exist
-  await ensureCollections();
+  // 2. Load server config from Qdrant
   await ensureConfigCollections(qd);
-
-  // 3. Load server config from Qdrant
   const serverCfg = await loadServerConfig(qd);
   applyServerConfig(serverCfg);
 
-  // 4. Build Fastify
+  // 3. Ensure all collections exist
+  await ensureCollections();
+
+  // 4. Initialize dashboard state
+  const { TOOLS, dispatchTool } = await import("./tools/registry.js");
+  const { initDashboardState }  = await import("./plugins/dashboard.js");
+  initDashboardState(TOOLS, dispatchTool);
+
+  // 5. Build Fastify
   const fastify = Fastify({ logger: false });
 
   // Register plugins

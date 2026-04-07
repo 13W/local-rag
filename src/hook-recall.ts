@@ -6,12 +6,32 @@ export async function runHookRecall(): Promise<void> {
   const body = Buffer.concat(chunks).toString("utf8").trim();
   if (!body) { process.stdout.write("{}"); return; }
 
+  // Parse CLI args: --project <id> [--agent <id>]
+  let projectId = "default";
+  let agentId   = "";
+
+  const args = process.argv.slice(2);
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === "--project" && args[i + 1]) {
+      projectId = args[i + 1]!;
+      i++;
+    } else if (args[i] === "--agent" && args[i + 1]) {
+      agentId = args[i + 1]!;
+      i++;
+    }
+  }
+  if (!agentId) agentId = projectId;
+
   const localCfg = await readLocalConfig(defaultLocalConfigPath()).catch(() => null);
   const port      = localCfg?.port ?? 7531;
   const serverUrl = process.env["MEMORY_SERVER_URL"] ?? `http://127.0.0.1:${port}`;
 
+  const url = new URL(`${serverUrl}/hooks/recall`);
+  url.searchParams.set("project", projectId);
+  url.searchParams.set("agent",   agentId);
+
   try {
-    const res = await fetch(`${serverUrl}/hooks/recall`, {
+    const res = await fetch(url.toString(), {
       method:  "POST",
       headers: { "Content-Type": "application/json" },
       body,

@@ -9,7 +9,7 @@
  *   executes the search, returns the LLM's final text to inject as systemMessage.
  */
 
-import { cfg } from "./config.js";
+import { cfg, getProjectId } from "./config.js";
 import { qd, colName } from "./qdrant.js";
 import { embedOne } from "./embedder.js";
 import { callLlmSimple, callLlmWithTools, defaultRouterSpec, type ToolDef } from "./llm-client.js";
@@ -75,11 +75,12 @@ const SEARCH_MEMORY_TOOL: ToolDef = {
 // ── Project profile ───────────────────────────────────────────────────────────
 
 async function _loadProfile(): Promise<ProjectProfile | null> {
+  const projectId = getProjectId();
   type ScrollPt = { payload?: Record<string, unknown> };
   const { points } = await qd.scroll(colName("memory"), {
     filter: {
       must: [
-        { key: "project_id", match: { value: cfg.projectId } },
+        { key: "project_id", match: { value: projectId } },
         { key: "_type",      match: { value: PROFILE_TYPE } },
       ],
     },
@@ -109,7 +110,7 @@ async function _loadProfile(): Promise<ProjectProfile | null> {
 
 /** Stable UUID-shaped ID for this project's profile point (same projectId → same ID). */
 function _profilePointId(): string {
-  const hash = createHash("sha256").update(`profile:${cfg.projectId}`).digest("hex");
+  const hash = createHash("sha256").update(`profile:${getProjectId()}`).digest("hex");
   // Format as UUID v4-shaped string (Qdrant requires UUID format)
   return `${hash.slice(0,8)}-${hash.slice(8,12)}-4${hash.slice(13,16)}-${hash.slice(16,20)}-${hash.slice(20,32)}`;
 }
@@ -119,6 +120,7 @@ function _profilePointId(): string {
  * No-op if a fresh profile (< 24h) already exists.
  */
 export async function buildProjectProfile(): Promise<void> {
+  const projectId = getProjectId();
   const cached = await _loadProfile();
   if (cached) {
     process.stderr.write(`[archivist] profile cached (built ${cached.builtAt})\n`);
@@ -135,7 +137,7 @@ export async function buildProjectProfile(): Promise<void> {
   for (const base of collectionBases) {
     const col = colName(base);
     const { points } = await qd.scroll(col, {
-      filter:       { must: [{ key: "project_id", match: { value: cfg.projectId } }] },
+      filter:       { must: [{ key: "project_id", match: { value: projectId } }] },
       limit:        15,
       with_payload: true,
     }).catch(() => ({ points: [] as ScrollPt[] }));
@@ -177,7 +179,7 @@ export async function buildProjectProfile(): Promise<void> {
   }
 
   const profile: ProjectProfile = {
-    projectId: cfg.projectId,
+    projectId,
     builtAt:   new Date().toISOString(),
     topTags,
     topTopics,
@@ -191,7 +193,7 @@ export async function buildProjectProfile(): Promise<void> {
     points: [{
       id:      profileId,
       vector,
-      payload: { _type: PROFILE_TYPE, project_id: cfg.projectId, ...profile },
+      payload: { _type: PROFILE_TYPE, project_id: projectId, ...profile },
     }],
   });
 
@@ -209,7 +211,7 @@ function _buildSystemPrompt(profile: ProjectProfile | null): string {
   ].join("\n") : "";
 
   return [
-    `You are a memory archivist for project "${profile?.projectId ?? "unknown"}".`,
+    `You are a memory archivist for project "${profile?.projectId ?? getProjectId()}".`,
     profileCtx,
     "",
     "ROLE:",
@@ -238,7 +240,7 @@ async function _executeSearchMemory(args: Record<string, unknown>): Promise<stri
   const vector = await embedOne(query);
 
   const mustFilter: Array<{ key: string; match: { value: string } }> = [
-    { key: "project_id", match: { value: cfg.projectId } },
+    { key: "project_id", match: { value: getProjectId() } },
   ];
   if (status) mustFilter.push({ key: "status", match: { value: status } });
 
