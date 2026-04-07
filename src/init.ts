@@ -31,7 +31,12 @@ export async function init(): Promise<void> {
     const agentId     = await prompt(rl, `Agent name [${projectId}]: `, projectId);
 
     // 4. Create project on server
-    const proj = mergeProjectConfig({ project_id: projectId, agent_id: agentId, display_name: projectId });
+    const proj = mergeProjectConfig({
+      project_id: projectId,
+      agent_id: agentId,
+      display_name: projectId,
+      project_root: resolve(process.cwd())
+    });
     const res  = await fetch(`${serverUrl}/api/projects`, {
       method:  "POST",
       headers: { "Content-Type": "application/json" },
@@ -48,7 +53,7 @@ export async function init(): Promise<void> {
     // 6. Print dashboard URL
     process.stderr.write(`\n[init] Project '${projectId}' created.\n`);
     process.stderr.write(`[init] Dashboard: ${serverUrl}/?project=${projectId}\n`);
-    process.stderr.write(`[init] Open the dashboard to configure project root, include paths, and start indexing.\n`);
+    process.stderr.write(`[init] Open the dashboard to configure include paths and start indexing.\n`);
   } finally {
     rl.close();
   }
