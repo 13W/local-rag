@@ -118,11 +118,11 @@ import type { ServerConfigData, ProjectConfigData } from "../../types";
               [value]="projectCfg()!.project_root"
               (input)="patchProject('project_root', $any($event.target).value)" />
           </label>
-          <label class="flex gap-2 items-center text-xs">
-            <span class="w-28 text-(--color-muted)">Include paths</span>
-            <input class="flex-1 bg-(--color-surface) border border-(--color-border) rounded px-2 py-1 text-xs font-mono text-(--color-text)"
-              [value]="projectCfg()!.include_paths.join(',')"
-              (input)="onIncludePathsInput($any($event.target).value)" />
+          <label class="flex gap-2 items-start text-xs">
+            <span class="w-28 text-(--color-muted) mt-1">Include paths</span>
+            <textarea class="flex-1 bg-(--color-surface) border border-(--color-border) rounded px-2 py-1 text-xs font-mono text-(--color-text) min-h-[80px] resize-y"
+              [value]="projectCfg()!.include_paths.join('\\n')"
+              (input)="onIncludePathsInput($any($event.target).value)"></textarea>
           </label>
 
           <h3 class="text-xs font-semibold text-(--color-muted) uppercase tracking-wider mt-2">Indexer</h3>
@@ -192,7 +192,7 @@ export class SettingsComponent implements OnInit {
   }
 
   onIncludePathsInput(value: string): void {
-    this.patchProject("include_paths", value.split(",").map(s => s.trim()).filter(Boolean));
+    this.patchProject("include_paths", value.split("\n").map(s => s.trim()).filter(Boolean));
   }
 
   saveServer(): void {
