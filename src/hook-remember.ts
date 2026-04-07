@@ -35,7 +35,7 @@ export async function runHookRemember(): Promise<void> {
       method:  "POST",
       headers: { "Content-Type": "application/json" },
       body,
-      signal:  AbortSignal.timeout(30_000),
+      signal:  AbortSignal.timeout(120_000),
     });
     if (!res.ok) { process.stdout.write("{}"); return; }
     const data = await res.text();

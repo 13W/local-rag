@@ -1,4 +1,5 @@
 import { cfg } from "./config.js";
+import { callLlmSimple, defaultRouterSpec } from "./llm-client.js";
 
 const MAX_CHARS = 3000;
 
@@ -17,7 +18,7 @@ async function embedOllama(texts: string[], baseUrl: string): Promise<number[][]
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ model: cfg.embedModel, input: texts }),
-    signal: AbortSignal.timeout(60_000),
+    signal: AbortSignal.timeout(120_000),
   });
   if (!resp.ok) {
     const body = await resp.text().catch(() => "");
@@ -32,7 +33,7 @@ async function embedOpenAI(texts: string[], baseUrl: string): Promise<number[][]
     method: "POST",
     headers: { "Content-Type": "application/json", "Authorization": `Bearer ${cfg.embedApiKey}` },
     body: JSON.stringify({ model: cfg.embedModel, input: texts }),
-    signal: AbortSignal.timeout(60_000),
+    signal: AbortSignal.timeout(120_000),
   });
   if (!resp.ok) {
     const body = await resp.text().catch(() => "");
@@ -47,7 +48,7 @@ async function embedVoyage(texts: string[], baseUrl: string): Promise<number[][]
     method: "POST",
     headers: { "Content-Type": "application/json", "Authorization": `Bearer ${cfg.embedApiKey}` },
     body: JSON.stringify({ model: cfg.embedModel, input: texts }),
-    signal: AbortSignal.timeout(60_000),
+    signal: AbortSignal.timeout(120_000),
   });
   if (!resp.ok) {
     const body = await resp.text().catch(() => "");
@@ -86,69 +87,9 @@ export async function embedOne(text: string): Promise<number[]> {
 
 // ── LLM ───────────────────────────────────────────────────────────────────────
 
-function resolveLlmUrl(): string {
-  return cfg.llmUrl || (
-    cfg.llmProvider === "anthropic" ? "https://api.anthropic.com"
-  : cfg.llmProvider === "openai"   ? "https://api.openai.com"
-  : cfg.ollamaUrl
-  );
-}
-
-async function callLlmOllama(prompt: string, _maxTokens: number): Promise<string> {
-  const resp = await fetch(`${resolveLlmUrl()}/api/generate`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ model: cfg.llmModel, prompt, stream: false }),
-    signal: AbortSignal.timeout(90_000),
-  });
-  if (!resp.ok) {
-    const body = await resp.text().catch(() => "");
-    return Promise.reject(new Error(`LLM failed: ${resp.status} ${resp.statusText} (model=${cfg.llmModel}) — ${body}`));
-  }
-  const data = (await resp.json()) as { response: string };
-  return data.response;
-}
-
-async function callLlmOpenAI(prompt: string, maxTokens: number): Promise<string> {
-  const resp = await fetch(`${resolveLlmUrl()}/v1/chat/completions`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${cfg.llmApiKey}` },
-    body: JSON.stringify({ model: cfg.llmModel, messages: [{ role: "user", content: prompt }], max_tokens: maxTokens }),
-    signal: AbortSignal.timeout(90_000),
-  });
-  if (!resp.ok) {
-    const body = await resp.text().catch(() => "");
-    return Promise.reject(new Error(`LLM failed: ${resp.status} ${resp.statusText} (model=${cfg.llmModel}) — ${body}`));
-  }
-  const data = (await resp.json()) as { choices: { message: { content: string } }[] };
-  return data.choices[0]!.message.content;
-}
-
-async function callLlmAnthropic(prompt: string, maxTokens: number): Promise<string> {
-  const resp = await fetch(`${resolveLlmUrl()}/v1/messages`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": cfg.llmApiKey,
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify({ model: cfg.llmModel, max_tokens: maxTokens, messages: [{ role: "user", content: prompt }] }),
-    signal: AbortSignal.timeout(90_000),
-  });
-  if (!resp.ok) {
-    const body = await resp.text().catch(() => "");
-    return Promise.reject(new Error(`LLM failed: ${resp.status} ${resp.statusText} (model=${cfg.llmModel}) — ${body}`));
-  }
-  const data = (await resp.json()) as { content: { type: string; text: string }[] };
-  return data.content[0]!.text;
-}
-
 export function callLlm(prompt: string, maxTokens: number): Promise<string> {
-  const fn =
-    cfg.llmProvider === "anthropic" ? callLlmAnthropic
-  : cfg.llmProvider === "openai"   ? callLlmOpenAI
-  : callLlmOllama;
-  return fn(prompt, maxTokens);
+  const spec = { ...defaultRouterSpec(), max_tokens: maxTokens };
+  return callLlmSimple(prompt, spec);
 }
 
 /**

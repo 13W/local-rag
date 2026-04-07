@@ -86,7 +86,7 @@ async function embedWithModel(model: string, texts: string[], maxChars: number):
     method:  "POST",
     headers: { "Content-Type": "application/json" },
     body:    JSON.stringify({ model, input: truncated }),
-    signal:  AbortSignal.timeout(120_000),
+    signal:  AbortSignal.timeout(180_000),
   });
   if (!resp.ok) {
     const body = await resp.text().catch(() => "");
