@@ -1,31 +1,30 @@
 import fastifyStatic from "@fastify/static";
 import type { FastifyInstance } from "fastify";
 import type { ServerResponse } from "node:http";
-import { spawn } from "node:child_process";
 import { getCurrentBranch } from "../indexer/git.js";
-import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { readFileSync } from "node:fs";
 import { cfg } from "../config.js";
+import { getProjectId as getProjectIdCtx, getAgentId as getAgentIdCtx, requestContext } from "../request-context.js";
 import { qd, colName } from "../qdrant.js";
-import { embedOne } from "../embedder.js";
-import { getProjectId, getAgentId, runWithContext, requestContext } from "../request-context.js";
+import type { ProjectConfig } from "../server-config.js";
 
-const _dir   = dirname(fileURLToPath(import.meta.url));
-const _uiDir = resolve(_dir, "../dashboard-ui");
+const _dir = dirname(fileURLToPath(import.meta.url));
+const _uiDir = resolve(_dir, "../../dist/dashboard-ui");
 
-const PKG_VERSION: string = (
+const PKG_VERSION = (
   JSON.parse(readFileSync(resolve(_dir, "../../package.json"), "utf8")) as { version: string }
 ).version;
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 interface ToolStats {
-  calls:    number;
-  bytesIn:  number;
-  bytesOut: number;
-  totalMs:  number;
-  errors:   number;
+  calls:     number;
+  bytesIn:   number;
+  bytesOut:  number;
+  totalMs:   number;
+  errors:    number;
 }
 
 interface RequestEntry {
@@ -45,9 +44,85 @@ interface RequestEntry {
 
 type DispatchFn = (tool: string, args: Record<string, unknown>) => Promise<string>;
 
-interface ToolSchemaDef {
-  name: string;
-  inputSchema: { properties: Record<string, unknown>; required: string[] };
+// ── Global state ──────────────────────────────────────────────────────────────
+
+const toolStats  = new Map<string, ToolStats>();
+const requestLog: RequestEntry[] = [];
+const LOG_MAX    = 500;
+
+const sseClients = new Set<ServerResponse>();
+
+let _dispatch: DispatchFn | null = null;
+let _toolSchemasJson = "[]";
+let _active = false;
+
+let _reindexProgress: { done: number; total: number; chunks: number } | null = null;
+let _reindexTimer: ReturnType<typeof setTimeout> | null = null;
+let _reindexLastSent = 0;
+
+// ── Statistics helpers ────────────────────────────────────────────────────────
+
+export function record(
+  tool:     string,
+  source:   "mcp" | "playground" | "hook",
+  bytesIn:  number,
+  bytesOut: number,
+  ms:       number,
+  ok:       boolean,
+  error?:   string,
+): void {
+  if (!_active) return;
+  const entry: RequestEntry = {
+    ts: Date.now(),
+    tool,
+    source,
+    projectId: getProjectIdCtx(),
+    agentId:   getAgentIdCtx(),
+    bytesIn,
+    bytesOut,
+    ms,
+    ok,
+    error,
+  };
+  updateStats(entry);
+  requestLog.push(entry);
+  if (requestLog.length > LOG_MAX) requestLog.shift();
+
+  // SSE broadcast
+  const data = `data: ${JSON.stringify({ type: "entry", entry, stats: statsSnapshot(), memory: memStats() })}\n\n`;
+  for (const res of new Set(sseClients)) res.write(data);
+}
+
+export function recordIndex(projectId: string, relPath: string, chunks: number, ms: number, ok: boolean): void {
+  if (!_active) return;
+  const entry: RequestEntry = { ts: Date.now(), tool: "indexer", file: relPath, source: "watcher", projectId, agentId: "indexer", bytesIn: 0, bytesOut: 0, ms, ok, chunks };
+  updateStats(entry);
+  requestLog.push(entry);
+  if (requestLog.length > LOG_MAX) requestLog.shift();
+
+  // SSE broadcast
+  const data = `data: ${JSON.stringify({ type: "entry", entry, stats: statsSnapshot(), memory: memStats() })}\n\n`;
+  for (const res of new Set(sseClients)) res.write(data);
+}
+
+async function serverInfo(): Promise<ServerInfo> {
+  const projectId = getProjectIdCtx();
+  const { loadProjectConfig } = await import("../server-config.js");
+  const project = await loadProjectConfig(qd, projectId);
+  const root = project?.project_root || cfg.projectRoot;
+
+  return {
+    projectId,
+    agentId:              getAgentIdCtx(),
+    version:              PKG_VERSION,
+    branch:               getCurrentBranch(root),
+    collectionPrefix:     cfg.collectionPrefix,
+    embedProvider:        cfg.embedProvider,
+    embedModel:           cfg.embedModel,
+    llmProvider:          cfg.llmProvider,
+    llmModel:             cfg.llmModel,
+    generateDescriptions: cfg.generateDescriptions,
+  };
 }
 
 interface ServerInfo {
@@ -63,56 +138,6 @@ interface ServerInfo {
   generateDescriptions: boolean;
 }
 
-// ── Module-level state ────────────────────────────────────────────────────────
-
-let _dispatch: DispatchFn | null = null;
-let _toolSchemasJson = "[]";
-let _active = false;
-
-// ── In-memory state ───────────────────────────────────────────────────────────
-
-const toolStats  = new Map<string, ToolStats>();
-const LOG_MAX    = 500;
-const requestLog: RequestEntry[] = [];
-const sseClients = new Set<ServerResponse>();
-
-// ── Watcher SSE throttle ──────────────────────────────────────────────────────
-let _watcherFlushTimer: ReturnType<typeof setTimeout> | null = null;
-let _watcherLastSse = 0;
-
-// ── Reindex progress ──────────────────────────────────────────────────────────
-interface ReindexProgress { total: number; done: number; chunks: number; }
-let _reindexProgress: ReindexProgress | null = null;
-let _reindexTimer: ReturnType<typeof setTimeout> | null = null;
-let _reindexLastSent = 0;
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-function memStats(): { rss: number; heapUsed: number; heapTotal: number; external: number } {
-  const m = process.memoryUsage();
-  return { rss: m.rss, heapUsed: m.heapUsed, heapTotal: m.heapTotal, external: m.external };
-}
-
-async function serverInfo(): Promise<ServerInfo> {
-  const projectId = getProjectId();
-  const { loadProjectConfig } = await import("../server-config.js");
-  const project = await loadProjectConfig(qd, projectId);
-  const root = project?.project_root || cfg.projectRoot;
-
-  return {
-    projectId,
-    agentId:              getAgentId(),
-    version:              PKG_VERSION,
-    branch:               getCurrentBranch(root),
-    collectionPrefix:     cfg.collectionPrefix,
-    embedProvider:        cfg.embedProvider,
-    embedModel:           cfg.embedModel,
-    llmProvider:          cfg.llmProvider,
-    llmModel:             cfg.llmModel,
-    generateDescriptions: cfg.generateDescriptions,
-  };
-}
-
 function statsSnapshot(): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [tool, s] of toolStats) {
@@ -125,24 +150,12 @@ function statsSnapshot(): Record<string, unknown> {
   return out;
 }
 
-async function persistEntry(entry: RequestEntry): Promise<void> {
-  const col = colName("request_logs");
-  const expiresAt = new Date(Date.now() + 7 * 86_400_000).toISOString();
-  await qd.upsert(col, {
-    points: [{
-      id: crypto.randomUUID(),
-      vector: [0],
-      payload: { ...entry, expires_at: expiresAt },
-    }],
-  }).catch((err: unknown) => {
-    process.stderr.write(`[dashboard] failed to persist log: ${String(err)}\n`);
-  });
+function memStats(): Record<string, number> {
+  return {};
 }
 
 function updateStats(entry: RequestEntry): void {
-  // Normalize tool name for indexer entries (group by tool, not by file path)
   const toolName = entry.source === "watcher" ? "indexer" : entry.tool;
-  
   const prev = toolStats.get(toolName) ?? { calls: 0, bytesIn: 0, bytesOut: 0, totalMs: 0, errors: 0 };
   toolStats.set(toolName, {
     calls:    prev.calls    + 1,
@@ -153,61 +166,13 @@ function updateStats(entry: RequestEntry): void {
   });
 }
 
-export function record(tool: string, source: "mcp" | "playground" | "hook", bytesIn: number, bytesOut: number, ms: number, ok: boolean, error?: string): void {
-  const projectId = getProjectId();
-  const agentId   = getAgentId();
-
-  const entry: RequestEntry = { ts: Date.now(), tool, source, projectId, agentId, bytesIn, bytesOut, ms, ok, ...(error ? { error } : {}) };
-  updateStats(entry);
-  requestLog.push(entry);
-  if (requestLog.length > LOG_MAX) requestLog.shift();
-
-  const data = `data: ${JSON.stringify({ type: "entry", entry, stats: statsSnapshot(), memory: memStats() })}\n\n`;
-  for (const res of new Set(sseClients)) res.write(data);
-
-  persistEntry(entry).catch(() => undefined);
-}
-
-export function recordIndex(projectId: string, relPath: string, chunks: number, ms: number, ok: boolean): void {
-  if (!_active) return;
-  const entry: RequestEntry = { ts: Date.now(), tool: "indexer", file: relPath, source: "watcher", projectId, agentId: "indexer", bytesIn: 0, bytesOut: 0, ms, ok, chunks };
-  updateStats(entry);
-  requestLog.push(entry);
-  if (requestLog.length > LOG_MAX) requestLog.shift();
-
-  // Throttle SSE writes to at most once per second
-  const elapsed = Date.now() - _watcherLastSse;
-  if (elapsed >= 1_000) {
-    if (_watcherFlushTimer) { clearTimeout(_watcherFlushTimer); _watcherFlushTimer = null; }
-    _watcherLastSse = Date.now();
-    const data = `data: ${JSON.stringify({ type: "entry", entry, stats: statsSnapshot(), memory: memStats() })}\n\n`;
-    for (const res of new Set(sseClients)) res.write(data);
-  } else if (!_watcherFlushTimer) {
-    _watcherFlushTimer = setTimeout(() => {
-      _watcherFlushTimer = null;
-      _watcherLastSse = Date.now();
-      const last = requestLog[requestLog.length - 1];
-      if (last?.source === "watcher") {
-        const data = `data: ${JSON.stringify({ type: "entry", entry: last, stats: statsSnapshot(), memory: memStats() })}\n\n`;
-        for (const res of new Set(sseClients)) res.write(data);
-      }
-    }, 1_000 - elapsed);
-  }
-
-  persistEntry(entry).catch(() => undefined);
-}
-
-function openBrowser(url: string): void {
-  const [cmd, ...args] =
-    process.platform === "darwin" ? ["open", url] :
-    process.platform === "win32"  ? ["cmd", "/c", "start", "", url] :
-                                    ["xdg-open", url];
-  spawn(cmd, args, { detached: true, stdio: "ignore" }).unref();
-}
-
 export function broadcastShutdown(): void {
-  const data = `data: ${JSON.stringify({ type: "shutdown" })}\n\n`;
-  for (const res of new Set(sseClients)) res.write(data);
+  const data = "data: {\"type\":\"shutdown\"}\n\n";
+  for (const res of new Set(sseClients)) {
+    res.write(data);
+    res.end();
+  }
+  sseClients.clear();
 }
 
 export function broadcastMemoryUpdate(): void {
@@ -223,9 +188,10 @@ export function broadcastBranchSwitch(branch: string): void {
 }
 
 export function broadcastError(err: unknown): void {
+  if (!_active) return;
   const message = err instanceof Error ? err.message : String(err);
   const stack   = err instanceof Error ? (err.stack ?? "") : "";
-  const data = `data: ${JSON.stringify({ type: "error", message, stack, ts: Date.now() })}\n\n`;
+  const data    = `data: ${JSON.stringify({ type: "error", error: { message, stack, ts: Date.now() } })}\n\n`;
   for (const res of new Set(sseClients)) res.write(data);
 }
 
@@ -262,7 +228,7 @@ async function scrollMemoryEntries(projectId?: string): Promise<MemoryEntry[]> {
         with_payload: true,
         with_vector:  false,
         ...(offset !== undefined && { offset }),
-      }).catch(() => ({ points: [] as { id: string | number; payload?: Record<string, unknown> | null }[], next_page_offset: null as null | string | number }));
+      }).catch(() => ({ points: [] as any[], next_page_offset: null }));
 
       for (const pt of result.points) {
         const p    = (pt.payload ?? {}) as Record<string, unknown>;
@@ -282,8 +248,8 @@ async function scrollMemoryEntries(projectId?: string): Promise<MemoryEntry[]> {
         });
       }
 
-      const next = (result as { next_page_offset?: string | number | null }).next_page_offset;
-      if (!next) break;
+      const next = result.next_page_offset;
+      if (!next || typeof next === "object") break;
       offset = next;
     }
   }
@@ -301,21 +267,21 @@ function _broadcastReindex(): void {
 }
 
 export function startReindex(total: number): void {
-  if (_reindexTimer) { clearTimeout(_reindexTimer); _reindexTimer = null; }
-  _reindexProgress = { total, done: 0, chunks: 0 };
-  _reindexLastSent = 0;
+  _reindexProgress = { done: 0, total, chunks: 0 };
+  _reindexLastSent = Date.now();
   _broadcastReindex();
 }
 
-export function tickReindex(chunks: number): void {
-  if (!_active || !_reindexProgress) return;
-  _reindexProgress.done++;
-  _reindexProgress.chunks += chunks;
-  const elapsed = Date.now() - _reindexLastSent;
-  if (elapsed >= 1_000) {
-    if (_reindexTimer) { clearTimeout(_reindexTimer); _reindexTimer = null; }
+export function tickReindex(done: number, chunks: number): void {
+  if (!_reindexProgress) return;
+  _reindexProgress.done = done;
+  _reindexProgress.chunks = chunks;
+  
+  const now = Date.now();
+  if (now - _reindexLastSent > 1_000) {
     _broadcastReindex();
   } else if (!_reindexTimer) {
+    const elapsed = now - _reindexLastSent;
     _reindexTimer = setTimeout(() => {
       _reindexTimer = null;
       _broadcastReindex();
@@ -331,12 +297,11 @@ export function endReindex(): void {
   _reindexProgress = null;
 }
 
-export async function initDashboardState(toolSchemas: ToolSchemaDef[], dispatch: DispatchFn): Promise<void> {
+export async function initDashboardState(toolSchemas: any[], dispatch: DispatchFn): Promise<void> {
   _active = true;
   _dispatch = dispatch;
   _toolSchemasJson = JSON.stringify(toolSchemas);
 
-  // Load history from Qdrant
   try {
     const col = colName("request_logs");
     const result = await qd.scroll(col, {
@@ -368,8 +333,9 @@ export async function initDashboardState(toolSchemas: ToolSchemaDef[], dispatch:
 
 export async function dashboardPlugin(fastify: FastifyInstance): Promise<void> {
   await fastify.register(fastifyStatic, {
-    root:  _uiDir,
-    index: false,
+    root: _uiDir,
+    prefix: "/",
+    wildcard: false,
   });
 
   fastify.get("/", async (req, reply) => {
@@ -399,43 +365,24 @@ export async function dashboardPlugin(fastify: FastifyInstance): Promise<void> {
   fastify.get("/events", async (req, reply) => {
     reply.hijack();
     const raw = reply.raw;
-    raw.setHeader("Content-Type",  "text/event-stream");
-    raw.setHeader("Cache-Control", "no-cache");
-    raw.setHeader("Connection",    "keep-alive");
-    raw.flushHeaders();
+    raw.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      "Connection": "keep-alive",
+    });
+    raw.write("\n");
 
-    const { listProjectConfigs } = await import("../server-config.js");
-    const projects = await listProjectConfigs(qd);
+    const q = req.query as Record<string, string>;
+    const projectId = q["project"] || "default";
+    const agentId   = q["agent"]   || projectId;
 
-    raw.write(`data: ${JSON.stringify({ type: "init", stats: statsSnapshot(), log: requestLog, reindex: _reindexProgress, memory: memStats(), projects })}\n\n`);
-    sseClients.add(raw);
-    req.raw.on("close", () => { sseClients.delete(raw); });
-  });
-
-  fastify.get("/api/stats", async (_req, _reply) => {
-    return { stats: statsSnapshot(), memory: memStats() };
-  });
-
-  fastify.post<{ Body: { tool: string; args: Record<string, unknown>; project_id?: string; agent_id?: string } }>("/api/run", (req, reply) => {
-    const t0      = Date.now();
-    const { tool, args, project_id, agent_id } = req.body;
-    const bytesIn = JSON.stringify(args ?? {}).length;
-
-    const projectId = project_id || "default";
-    const agentId   = agent_id   || "playground";
-
-    void runWithContext({ projectId, agentId }, async () => {
-      try {
-        const result = await _dispatch!(tool, args ?? {});
-        const ms = Date.now() - t0;
-        record(tool, "playground", bytesIn, result.length, ms, true);
-        void reply.send({ ok: true, result, ms });
-      } catch (err: unknown) {
-        const ms     = Date.now() - t0;
-        const errStr = err instanceof Error ? (err.stack ?? err.message) : String(err);
-        record(tool, "playground", bytesIn, 0, ms, false, errStr);
-        void reply.code(500).send({ ok: false, error: String(err), ms });
-      }
+    return requestContext.run({ projectId, agentId }, async () => {
+      const { listProjectConfigs } = await import("../server-config.js");
+      const projects = await listProjectConfigs(qd);
+      const data = `data: ${JSON.stringify({ type: "init", stats: statsSnapshot(), log: requestLog, serverInfo: await serverInfo(), memory: memStats(), projects })}\n\n`;
+      raw.write(data);
+      sseClients.add(raw);
+      req.raw.on("close", () => { sseClients.delete(raw); });
     });
   });
 
@@ -443,7 +390,7 @@ export async function dashboardPlugin(fastify: FastifyInstance): Promise<void> {
     const entries = await scrollMemoryEntries(req.query.project_id);
 
     const statusCounts: Record<string, number> = {
-      in_progress: 0, resolved: 0, open_question: 0, hypothesis: 0,
+      in_progress: 0, resolved: 0, open_question: 0, hypothesis: 0, observation: 0,
     };
     for (const e of entries) {
       if (e.status in statusCounts) statusCounts[e.status]!++;
@@ -493,29 +440,32 @@ export async function dashboardPlugin(fastify: FastifyInstance): Promise<void> {
     const projectId = req.query.project_id || "default";
     const agentId   = req.query.agent_id   || projectId;
 
-    const { runWithContext } = await import("../request-context.js");
     const { runArchivist }   = await import("../archivist.js");
 
-    return runWithContext({ projectId, agentId }, async () => {
-      // 1. Run LLM-powered archivist (same as hook-recall)
+    return requestContext.run({ projectId, agentId }, async () => {
       const systemMessage = await runArchivist(q);
+      const { embedOne } = await import("../embedder.js");
+      const embedding = await embedOne(q);
 
-      // 2. Also do raw vector search for the UI hits
-      const vector    = await embedOne(q);
-      const mustFilter: any[] = [{ key: "project_id", match: { value: projectId } }];
+      const memCols = [colName("memory"), colName("memory_agents"), colName("memory_episodic"), colName("memory_semantic"), colName("memory_procedural")];
+      const memHits = await Promise.all(memCols.map(col => 
+        qd.search(col, { 
+          vector: embedding, 
+          filter: { must: [{ key: "project_id", match: { value: projectId } }] },
+          limit: 10,
+          with_payload: true
+        }).catch(() => [])
+      )).then(results => results.flat());
 
-      type QHit = Awaited<ReturnType<typeof qd.search>>[number];
-      const [memHits, agentHits] = await Promise.all([
-        qd.search(colName("memory"), {
-          vector, filter: { must: mustFilter }, limit: 10, with_payload: true, score_threshold: 0.5,
-        }).catch((): QHit[] => []),
-        qd.search(colName("memory_agents"), {
-          vector, filter: { must: mustFilter }, limit: 10, with_payload: true, score_threshold: 0.5,
-        }).catch((): QHit[] => []),
-      ]);
+      const agentHits = await qd.search(colName("memory_agents"), {
+        vector: embedding,
+        filter: { must: [{ key: "project_id", match: { value: projectId } }] },
+        limit: 10,
+        with_payload: true
+      }).catch(() => []);
 
       const seen: Set<string> = new Set();
-      const results: Array<{ id: string; text: string; status: string; confidence: number; score: number; session_id: string; session_type: string; updated_at: string; created_at: string }> = [];
+      const results: any[] = [];
       for (const hit of [...memHits, ...agentHits]) {
         const p    = (hit.payload ?? {}) as Record<string, unknown>;
         const hash = String(p["content_hash"] ?? hit.id);
@@ -523,9 +473,9 @@ export async function dashboardPlugin(fastify: FastifyInstance): Promise<void> {
         seen.add(hash);
         results.push({
           id:           String(hit.id),
-          text:         String(p["text"] ?? ""),
+          text:         String(p["text"] ?? p["content"] ?? ""),
           status:       String(p["status"] ?? "resolved"),
-          confidence:   Number(p["confidence"] ?? 0),
+          confidence:   Number(p["confidence"] ?? p["importance"] ?? 0),
           score:        hit.score,
           session_id:   String(p["session_id"] ?? ""),
           session_type: String(p["session_type"] ?? ""),
@@ -534,96 +484,66 @@ export async function dashboardPlugin(fastify: FastifyInstance): Promise<void> {
         });
       }
       results.sort((a, b) => b.score - a.score);
-
       return { systemMessage, results: results.slice(0, 5) };
     });
   });
 
-  fastify.post("/api/projects", async (req, reply) => {
-    const { upsertProjectConfig, mergeProjectConfig } = await import("../server-config.js");
-    const { qd } = await import("../qdrant.js");
-    const { IndexerManager } = await import("../indexer/manager.js");
-    const body = req.body as Partial<import("../server-config.js").ProjectConfig> & { project_id: string };
+  fastify.post<{ Body: Partial<ProjectConfig> & { project_id: string } }>("/api/projects", async (req, reply) => {
+    const body = req.body;
     if (!body.project_id) return reply.code(400).send({ error: "Missing project_id" });
+    const { mergeProjectConfig, upsertProjectConfig } = await import("../server-config.js");
+    const { IndexerManager } = await import("../indexer/manager.js");
+    const { readLocalConfig, defaultLocalConfigPath } = await import("../local-config.js");
+
     const updated = mergeProjectConfig(body);
     await upsertProjectConfig(qd, updated);
-    const { readLocalConfig, defaultLocalConfigPath } = await import("../local-config.js");
     const localConfig = await readLocalConfig(defaultLocalConfigPath());
     await IndexerManager.syncProject(updated, localConfig);
     return reply.code(201).send({ ok: true });
   });
 
-  fastify.get("/api/projects", async (_req, reply) => {
-    const { listProjectConfigs } = await import("../server-config.js");
-    const { qd } = await import("../qdrant.js");
-    const projects = await listProjectConfigs(qd);
-    return reply.send({ projects });
+  fastify.post<{ Body: { tool: string; args: Record<string, unknown>; project_id?: string; agent_id?: string } }>("/api/run", (req, reply) => {
+    if (!_dispatch) return reply.code(503).send({ error: "Dashboard not initialized" });
+    const { tool, args, project_id, agent_id } = req.body;
+    const projectId = project_id || "default";
+    const agentId   = agent_id   || projectId;
+
+    return requestContext.run({ projectId, agentId }, async () => {
+      const t0 = Date.now();
+      try {
+        const result = await _dispatch!(tool, args);
+        const ms = Date.now() - t0;
+        record(tool, "playground", JSON.stringify(args).length, result.length, ms, true);
+        return reply.send({ result });
+      } catch (err: unknown) {
+        const ms = Date.now() - t0;
+        record(tool, "playground", JSON.stringify(args).length, 0, ms, false, String(err));
+        return reply.code(500).send({ error: String(err) });
+      }
+    });
   });
 
-  // GET /api/config/server — return current server config
-  fastify.get("/api/config/server", async () => {
-    const { loadServerConfig } = await import("../server-config.js");
-    const { qd } = await import("../qdrant.js");
-    return loadServerConfig(qd);
-  });
+  fastify.get("/api/init", async (req) => {
+    const q         = req.query as Record<string, string>;
+    const projectId = q["project"] || "default";
+    const agentId   = q["agent"]   || projectId;
 
-  // PUT /api/config/server — update server config
-  fastify.put("/api/config/server", async (req, reply) => {
-    const { loadServerConfig, saveServerConfig, mergeServerConfig } = await import("../server-config.js");
-    const { applyServerConfig } = await import("../config.js");
-    const { qd } = await import("../qdrant.js");
-    const current = await loadServerConfig(qd);
-    const body = req.body as Record<string, unknown>;
-    const updated = mergeServerConfig({ ...current, ...body });
-    await saveServerConfig(qd, updated);
-    applyServerConfig(updated);
-    return reply.send({ ok: true });
-  });
-
-  // GET /api/projects/:projectId
-  fastify.get<{ Params: { projectId: string } }>("/api/projects/:projectId", async (req) => {
-    const { loadProjectConfig } = await import("../server-config.js");
-    const { qd } = await import("../qdrant.js");
-    return loadProjectConfig(qd, req.params.projectId);
-  });
-
-  // PUT /api/projects/:projectId
-  fastify.put<{ Params: { projectId: string } }>("/api/projects/:projectId", async (req, reply) => {
-    const { loadProjectConfig, upsertProjectConfig, mergeProjectConfig } = await import("../server-config.js");
-    const { qd } = await import("../qdrant.js");
-    const { IndexerManager } = await import("../indexer/manager.js");
-    const body = req.body as Record<string, unknown>;
-    const current = await loadProjectConfig(qd, req.params.projectId) ?? mergeProjectConfig({ project_id: req.params.projectId });
-    const updated = mergeProjectConfig({ ...current, ...body, project_id: req.params.projectId });
-    await upsertProjectConfig(qd, updated);
-    const { readLocalConfig, defaultLocalConfigPath } = await import("../local-config.js");
-    const localConfig = await readLocalConfig(defaultLocalConfigPath());
-    await IndexerManager.syncProject(updated, localConfig);
-    return reply.send({ ok: true });
+    return requestContext.run({ projectId, agentId }, async () => {
+      const { listProjectConfigs } = await import("../server-config.js");
+      const projects = await listProjectConfigs(qd);
+      return {
+        stats:      statsSnapshot(),
+        log:        requestLog,
+        schemas:    JSON.parse(_toolSchemasJson) as unknown[],
+        serverInfo: await serverInfo(),
+        memory:     memStats(),
+        projects,
+      };
+    });
   });
 }
 
-// ── Legacy startDashboard (kept for backward compat during transition) ────────
-
-export function startDashboard(port: number, toolSchemas: ToolSchemaDef[], dispatch: DispatchFn): void {
-  initDashboardState(toolSchemas, dispatch);
-  import("fastify").then(({ default: Fastify }) => {
-    const app = Fastify({ logger: false });
-    void dashboardPlugin(app).then(() => {
-      app.listen({ port, host: "0.0.0.0" })
-        .then(() => {
-          const addr = app.server.address();
-          const actualPort = typeof addr === "object" && addr ? addr.port : port;
-          const url = `http://localhost:${actualPort}`;
-          process.stderr.write(`[dashboard] ${url}\n`);
-          openBrowser(url);
-          app.server.unref();
-        })
-        .catch((err: unknown) => {
-          process.stderr.write(`[dashboard] HTTP error: ${String(err)}\n`);
-        });
-    });
-  }).catch((err: unknown) => {
-    process.stderr.write(`[dashboard] import error: ${String(err)}\n`);
-  });
+export async function startDashboard(fastify: FastifyInstance, toolSchemas: any[], dispatch: DispatchFn): Promise<void> {
+  await initDashboardState(toolSchemas, dispatch);
+  await dashboardPlugin(fastify);
 }

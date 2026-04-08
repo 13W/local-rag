@@ -29,7 +29,7 @@ export class IndexerManager {
           recordIndex(project.project_id, msg.relPath, msg.chunks, msg.ms, msg.ok);
         } else if (msg.type === "progress") {
           if (msg.done === 1 && msg.total > 1) startReindex(msg.total);
-          tickReindex(msg.chunks);
+          tickReindex(msg.done, msg.chunks);
           if (msg.done === msg.total) endReindex();
         } else if (msg.type === "info") {
           process.stderr.write(`[indexer-manager] ${msg.message}\n`);
