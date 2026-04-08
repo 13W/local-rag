@@ -3,6 +3,8 @@ import { embedOne } from "../embedder.js";
 import { cfg, getProjectId, getCurrentBranchCached } from "../config.js";
 import { rerank as rerankHits } from "../reranker.js";
 import type { Schemas } from "@qdrant/js-client-rest";
+import { callLlmSimple, defaultRouterSpec } from "../llm-client.js";
+import { debugLog } from "../util.js";
 
 export interface SearchCodeArgs {
   query:        string;
@@ -20,7 +22,30 @@ export interface SearchCodeArgs {
 type ScoredPoint = Schemas["ScoredPoint"];
 
 export async function searchCodeTool(a: SearchCodeArgs): Promise<string> {
-  const embedding = await embedOne(a.query);
+  let searchQuery = a.query;
+
+  // Translation layer: if query is not in English, translate it to improve semantic search
+  // against English descriptions and code.
+  if (/[а-яА-Я]/.test(a.query)) {
+    const translationPrompt = 
+      "Translate the following technical search query to English. " +
+      "Preserve code identifiers and technical terms as is. " +
+      "Output ONLY the translated text.\\n\\n" +
+      `Query: ${a.query}`;
+    
+    try {
+      const spec = cfg.routerConfig ?? defaultRouterSpec();
+      const translated = await callLlmSimple(translationPrompt, spec);
+      if (translated && translated.trim()) {
+        debugLog("search_code", `Translated query: "${a.query}" -> "${translated.trim()}"`);
+        searchQuery = translated.trim();
+      }
+    } catch (err) {
+      debugLog("search_code", `Translation failed: ${String(err)}`);
+    }
+  }
+
+  const embedding = await embedOne(searchQuery);
 
   const branchFilter = a.branch || getCurrentBranchCached();
   const must: Array<{ key: string; match: { value: string } | { text: string } }> = [
@@ -42,6 +67,8 @@ export async function searchCodeTool(a: SearchCodeArgs): Promise<string> {
     should: [
       { key: "name",    match: { text: a.query } },
       { key: "content", match: { text: a.query } },
+      { key: "name",    match: { text: searchQuery } },
+      { key: "content", match: { text: searchQuery } },
     ],
   };
 
@@ -114,7 +141,7 @@ export async function searchCodeTool(a: SearchCodeArgs): Promise<string> {
   }
 
   if (a.rerank && hits.length > 0) {
-    hits = await rerankHits(a.query, hits, a.top ?? a.limit);
+    hits = await rerankHits(searchQuery, hits, a.top ?? a.limit);
   }
 
   if (hits.length === 0) return "nothing found in codebase.";
