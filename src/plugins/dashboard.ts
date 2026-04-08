@@ -93,12 +93,17 @@ function memStats(): { rss: number; heapUsed: number; heapTotal: number; externa
   return { rss: m.rss, heapUsed: m.heapUsed, heapTotal: m.heapTotal, external: m.external };
 }
 
-function serverInfo(): ServerInfo {
+async function serverInfo(): Promise<ServerInfo> {
+  const projectId = getProjectId();
+  const { loadProjectConfig } = await import("../server-config.js");
+  const project = await loadProjectConfig(qd, projectId);
+  const root = project?.project_root || cfg.projectRoot;
+
   return {
-    projectId:            getProjectId(),
+    projectId,
     agentId:              getAgentId(),
     version:              PKG_VERSION,
-    branch:               getCurrentBranch(cfg.projectRoot),
+    branch:               getCurrentBranch(root),
     collectionPrefix:     cfg.collectionPrefix,
     embedProvider:        cfg.embedProvider,
     embedModel:           cfg.embedModel,
@@ -378,7 +383,7 @@ export async function dashboardPlugin(fastify: FastifyInstance): Promise<void> {
         stats:      statsSnapshot(),
         log:        requestLog,
         schemas:    JSON.parse(_toolSchemasJson) as unknown[],
-        serverInfo: serverInfo(),
+        serverInfo: await serverInfo(),
         memory:     memStats(),
         projects,
       });

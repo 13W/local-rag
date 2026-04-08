@@ -5,6 +5,7 @@ import { startWatcher } from "./watcher.js";
 import { applyServerConfig, cfg } from "../config.js";
 import type { ServerConfig, ProjectConfig } from "../server-config.js";
 import { existsSync } from "node:fs";
+import { getCurrentBranch } from "./git.js";
 
 if (!parentPort) throw new Error("This script must be run as a worker thread.");
 
@@ -77,17 +78,20 @@ parentPort.on("message", async (msg) => {
       
       if (!indexer) {
         isInitializing = true;
-        parentPort!.postMessage({ type: "info", message: `Initializing indexer for project ${projectConfig.project_id}` });
+        const root = resolve(projectConfig.project_root || ".");
+        const branch = getCurrentBranch(root);
+
+        parentPort!.postMessage({ type: "info", message: `Initializing indexer for project ${projectConfig.project_id} on branch ${branch}` });
 
         indexer = new CodeIndexer({
           projectId: projectConfig.project_id,
           projectRoot: projectConfig.project_root,
           includePaths: projectConfig.include_paths,
           generateDescriptions: cfg.generateDescriptions,
+          branch,
         });
         
         await indexer.ensureCollection();
-        const root = resolve(projectConfig.project_root || ".");
         
         parentPort!.postMessage({ type: "info", message: `Starting initial scan for ${root}` });
 
