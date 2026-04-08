@@ -140,8 +140,11 @@ async function persistEntry(entry: RequestEntry): Promise<void> {
 }
 
 function updateStats(entry: RequestEntry): void {
-  const prev = toolStats.get(entry.tool) ?? { calls: 0, bytesIn: 0, bytesOut: 0, totalMs: 0, errors: 0 };
-  toolStats.set(entry.tool, {
+  // Normalize tool name for indexer entries (group by tool, not by file path)
+  const toolName = entry.source === "watcher" ? "indexer" : entry.tool;
+  
+  const prev = toolStats.get(toolName) ?? { calls: 0, bytesIn: 0, bytesOut: 0, totalMs: 0, errors: 0 };
+  toolStats.set(toolName, {
     calls:    prev.calls    + 1,
     bytesIn:  prev.bytesIn  + entry.bytesIn,
     bytesOut: prev.bytesOut + entry.bytesOut,
