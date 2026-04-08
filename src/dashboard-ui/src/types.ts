@@ -17,6 +17,7 @@ export interface RequestEntry {
   ms:       number;
   ok:       boolean;
   chunks?:  number;
+  file?:    string;
   error?:   string;
 }
 

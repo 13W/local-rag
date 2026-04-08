@@ -39,6 +39,7 @@ interface RequestEntry {
   ms:       number;
   ok:       boolean;
   chunks?:  number;
+  file?:    string;
   error?:   string;
 }
 
@@ -148,7 +149,7 @@ export function record(tool: string, source: "mcp" | "playground" | "hook", byte
 
 export function recordIndex(projectId: string, relPath: string, chunks: number, ms: number, ok: boolean): void {
   if (!_active) return;
-  const entry: RequestEntry = { ts: Date.now(), tool: relPath, source: "watcher", projectId, agentId: "indexer", bytesIn: 0, bytesOut: 0, ms, ok, chunks };
+  const entry: RequestEntry = { ts: Date.now(), tool: "indexer", file: relPath, source: "watcher", projectId, agentId: "indexer", bytesIn: 0, bytesOut: 0, ms, ok, chunks };
   updateStats(entry);
   requestLog.push(entry);
   if (requestLog.length > LOG_MAX) requestLog.shift();

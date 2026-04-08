@@ -18,7 +18,7 @@
           (click)="toggleRow(e)"
         >
           <td>{{ fmtTime(e.ts) }}</td>
-          <td>{{ e.tool }}</td>
+          <td>{{ e.file || e.tool }}</td>
           <td><span [class]="srcClass(e)">{{ srcLabel(e) }}</span></td>
           <td>{{ e.source === 'watcher' ? '—' : fmtBytes(e.bytesIn) }}</td>
           <td>{{ outVal(e) }}</td>
