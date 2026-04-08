@@ -1,4 +1,4 @@
-export type MemoryType = "episodic" | "semantic" | "procedural";
+export type MemoryType = "episodic" | "semantic" | "procedural" | "memory" | "memory_agents";
 export type ScopeType  = "agent" | "project" | "global";
 
 export interface MemoryPayload {
@@ -33,15 +33,17 @@ export interface CodeChunkPayload {
 }
 
 export interface StoreMemoryParams {
-  content:     string;
-  memoryType:  MemoryType;
-  scope:       ScopeType;
-  tags:        string;
-  importance:  number;
-  ttlHours:    number;
-  status?:     Status;
-  sessionId?:  string;
+  content:      string;
+  memoryType:   MemoryType;
+  scope:        ScopeType;
+  tags:         string;
+  importance:   number;
+  ttlHours:     number;
+  status?:      Status;
+  sessionId?:   string;
   sessionType?: string;
+  confidence?:  number;
+  source?:      string;
 }
 
 // ── New memory schema (specification.md) ──────────────────────────────────────

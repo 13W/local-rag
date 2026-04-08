@@ -24,10 +24,26 @@ export function nowIso(): string {
 }
 
 export async function storeMemory(params: StoreMemoryParams): Promise<string> {
-  const { content, memoryType, scope, tags, importance, ttlHours, status, sessionId, sessionType } = params;
+  const {
+    content,
+    memoryType,
+    scope,
+    tags,
+    importance,
+    ttlHours,
+    status,
+    sessionId,
+    sessionType,
+    confidence,
+    source,
+  } = params;
 
-  if (!["episodic", "semantic", "procedural"].includes(memoryType)) {
-    return "error: memory_type must be: episodic, semantic, procedural";
+  if (
+    !["episodic", "semantic", "procedural", "memory", "memory_agents"].includes(
+      memoryType,
+    )
+  ) {
+    return "error: memory_type must be: episodic, semantic, procedural, memory, memory_agents";
   }
 
   const colName = colForType(memoryType);
@@ -37,7 +53,7 @@ export async function storeMemory(params: StoreMemoryParams): Promise<string> {
     filter: {
       must: [
         { key: "content_hash", match: { value: hash } },
-        { key: "project_id",   match: { value: getProjectId() } },
+        { key: "project_id", match: { value: getProjectId() } },
       ],
     },
     limit: 1,
@@ -46,40 +62,63 @@ export async function storeMemory(params: StoreMemoryParams): Promise<string> {
     return `already exists: ${existing[0]!.id}`;
   }
 
-  const memId  = crypto.randomUUID();
-  const now    = nowIso();
+  const memId = crypto.randomUUID();
+  const now = nowIso();
   const tagList = tags
-    ? tags.split(",").map((t) => t.trim()).filter(Boolean)
+    ? tags
+        .split(",")
+        .map((t) => t.trim())
+        .filter(Boolean)
     : [];
 
-  const expiresAt = ttlHours > 0
-    ? new Date(Date.now() + ttlHours * 3_600_000).toISOString()
-    : "";
+  const expiresAt =
+    ttlHours > 0
+      ? new Date(Date.now() + ttlHours * 3_600_000).toISOString()
+      : "";
 
   const embedding = await embedOne(content);
+
+  const isNewSchema = memoryType === "memory" || memoryType === "memory_agents";
+  const payload: any = isNewSchema
+    ? {
+        text: content,
+        status: status ?? "in_progress",
+        session_id: sessionId ?? "",
+        session_type: sessionType ?? "unknown",
+        created_at: now,
+        updated_at: now,
+        resolved_at: status === "resolved" ? now : null,
+        confidence: confidence ?? importance,
+        source: source ?? "hook-remember",
+        project_id: getProjectId(),
+        agent_id: getAgentId(),
+        content_hash: hash,
+      }
+    : {
+        content,
+        agent_id: getAgentId(),
+        project_id: getProjectId(),
+        memory_type: memoryType,
+        scope,
+        status:
+          status ?? (memoryType === "episodic" ? "in_progress" : "resolved"),
+        importance,
+        access_count: 0,
+        tags: tagList,
+        content_hash: hash,
+        session_id: sessionId ?? "",
+        session_type: sessionType ?? "unknown",
+        created_at: now,
+        updated_at: now,
+        expires_at: expiresAt,
+      };
 
   await qd.upsert(colName, {
     points: [
       {
-        id:      memId,
-        vector:  embedding,
-        payload: {
-          content,
-          agent_id:     getAgentId(),
-          project_id:   getProjectId(),
-          memory_type:  memoryType,
-          scope,
-          status:       status ?? (memoryType === "episodic" ? "in_progress" : "resolved"),
-          importance,
-          access_count: 0,
-          tags:         tagList,
-          content_hash: hash,
-          session_id:   sessionId ?? "",
-          session_type: sessionType ?? "unknown",
-          created_at:   now,
-          updated_at:   now,
-          expires_at:   expiresAt,
-        },
+        id: memId,
+        vector: embedding,
+        payload,
       },
     ],
   });
