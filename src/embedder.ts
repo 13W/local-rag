@@ -13,12 +13,12 @@ function resolveEmbedUrl(): string {
   );
 }
 
-async function embedOllama(texts: string[], baseUrl: string): Promise<number[][]> {
+async function embedOllama(texts: string[], baseUrl: string, timeout: number): Promise<number[][]> {
   const resp = await fetch(`${baseUrl}/api/embed`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ model: cfg.embedModel, input: texts }),
-    signal: AbortSignal.timeout(120_000),
+    signal: AbortSignal.timeout(timeout),
   });
   if (!resp.ok) {
     const body = await resp.text().catch(() => "");
@@ -28,12 +28,12 @@ async function embedOllama(texts: string[], baseUrl: string): Promise<number[][]
   return data.embeddings;
 }
 
-async function embedOpenAI(texts: string[], baseUrl: string): Promise<number[][]> {
+async function embedOpenAI(texts: string[], baseUrl: string, timeout: number): Promise<number[][]> {
   const resp = await fetch(`${baseUrl}/v1/embeddings`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "Authorization": `Bearer ${cfg.embedApiKey}` },
     body: JSON.stringify({ model: cfg.embedModel, input: texts }),
-    signal: AbortSignal.timeout(120_000),
+    signal: AbortSignal.timeout(timeout),
   });
   if (!resp.ok) {
     const body = await resp.text().catch(() => "");
@@ -43,12 +43,12 @@ async function embedOpenAI(texts: string[], baseUrl: string): Promise<number[][]
   return data.data.map((d) => d.embedding);
 }
 
-async function embedVoyage(texts: string[], baseUrl: string): Promise<number[][]> {
+async function embedVoyage(texts: string[], baseUrl: string, timeout: number): Promise<number[][]> {
   const resp = await fetch(`${baseUrl}/v1/embeddings`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "Authorization": `Bearer ${cfg.embedApiKey}` },
     body: JSON.stringify({ model: cfg.embedModel, input: texts }),
-    signal: AbortSignal.timeout(120_000),
+    signal: AbortSignal.timeout(timeout),
   });
   if (!resp.ok) {
     const body = await resp.text().catch(() => "");
@@ -60,12 +60,13 @@ async function embedVoyage(texts: string[], baseUrl: string): Promise<number[][]
 
 function embedBatchAttempt(texts: string[], attempt: number): Promise<number[][]> {
   const baseUrl = resolveEmbedUrl();
+  const timeout = cfg.embedTimeout * 1000;
   const providerFn =
     cfg.embedProvider === "openai"  ? embedOpenAI
   : cfg.embedProvider === "voyage" ? embedVoyage
   : embedOllama;
-  return providerFn(texts, baseUrl).catch((err: unknown) => {
-    if (attempt >= 2) return Promise.reject(err);
+  return providerFn(texts, baseUrl, timeout).catch((err: unknown) => {
+    if (attempt >= cfg.embedMaxAttempts - 1) return Promise.reject(err);
     return new Promise<void>((r) => setTimeout(r, (attempt + 1) * 1000))
       .then(() => embedBatchAttempt(texts, attempt + 1));
   });
@@ -94,8 +95,7 @@ export function callLlm(prompt: string, maxTokens: number): Promise<string> {
 
 /**
  * Generate a 1-2 sentence English description of a code chunk using the LLM.
- * Returns empty string on failure.
- */
+ * Returns empty string on failure.\n */
 export function generateDescription(chunk: {
   content:   string;
   name:      string;
@@ -105,7 +105,7 @@ export function generateDescription(chunk: {
   const preview = chunk.content.slice(0, 600);
   const prompt =
     `Describe briefly in 1-2 sentences what this ${chunk.language} ${chunk.chunkType} ` +
-    `"${chunk.name}" does:\n\n${preview}`;
+    `"${chunk.name}" does:\\n\\n${preview}`;
   return callLlm(prompt, 200)
     .then((text) => text.trim().slice(0, 3000));
 }
@@ -120,17 +120,17 @@ export function llmFilter(
 
   const lines = candidates.map((c, i) => `[${i}] ${c[3].slice(0, 300)}`);
   const prompt =
-    `Query: "${query}"\n\n` +
-    `Memory entries:\n` +
-    lines.join("\n") +
-    `\n\nReturn a JSON array of indices of entries that are ACTUALLY relevant to the query. ` +
+    `Query: "${query}"\\n\\n` +
+    `Memory entries:\\n` +
+    lines.join("\\n") +
+    `\\n\\nReturn a JSON array of indices of entries that are ACTUALLY relevant to the query. ` +
     `If none are relevant return []. Example: [0, 2]`;
 
   return callLlm(prompt, 256)
     .then((text) => {
-      const m = text.trim().match(/\[[\d,\s]*\]/);
+      const m = text.trim().match(/\\[[\\d,\\s]*\\]/);
       if (!m) {
-        process.stderr.write(`[embedder] llmFilter: no JSON array in response — keeping all\n`);
+        process.stderr.write(`[embedder] llmFilter: no JSON array in response — keeping all\\n`);
         return candidates;
       }
       const indices: unknown[] = JSON.parse(m[0]) as unknown[];
@@ -140,7 +140,7 @@ export function llmFilter(
     })
     .catch((err: unknown) => {
       const msg = err instanceof Error ? err.message : String(err);
-      process.stderr.write(`[embedder] llmFilter ${msg} — returning unfiltered\n`);
+      process.stderr.write(`[embedder] llmFilter ${msg} — returning unfiltered\\n`);
       return candidates;
     });
 }

@@ -5,15 +5,17 @@ import { setCollectionPrefix, setEmbedDim } from "./qdrant.js";
 // Re-export for backward compat — tools can import these from config.js
 export { getProjectId, getAgentId };
 
-// ── RouterProviderSpec (kept for backward compat) ─────────────────────────────
+// ── RouterProviderSpec ────────────────────────────────────────────────────────
 
 export interface RouterProviderSpec {
-  provider:    "ollama" | "anthropic" | "openai" | "gemini";
-  model:       string;
-  api_key?:    string;
-  url?:        string;
-  max_tokens?: number;
-  fallback?:   RouterProviderSpec | null;
+  provider:     "ollama" | "anthropic" | "openai" | "gemini";
+  model:        string;
+  api_key?:     string;
+  url?:         string;
+  timeout?:     number;
+  max_attempts?: number;
+  max_tokens?:  number;
+  fallback?:    RouterProviderSpec | null;
 }
 
 // ── Runtime config ────────────────────────────────────────────────────────────
@@ -25,11 +27,15 @@ interface RuntimeConfig {
   embedApiKey:          string;
   embedDim:             number;
   embedUrl:             string;
+  embedTimeout:         number;
+  embedMaxAttempts:     number;
   ollamaUrl:            string;
   llmProvider:          "ollama" | "anthropic" | "openai" | "gemini";
   llmModel:             string;
   llmApiKey:            string;
   llmUrl:               string;
+  llmTimeout:           number;
+  llmMaxAttempts:       number;
   routerConfig:         RouterProviderSpec | null;
   collectionPrefix:     string;
   port:                 number;
@@ -52,11 +58,15 @@ export const cfg: RuntimeConfig = {
   embedApiKey:          "",
   embedDim:             768,
   embedUrl:             "",
+  embedTimeout:         120,
+  embedMaxAttempts:     3,
   ollamaUrl:            "http://localhost:11434",
   llmProvider:          "ollama",
   llmModel:             "gemma3n:e2b",
   llmApiKey:            "",
   llmUrl:               "",
+  llmTimeout:           120,
+  llmMaxAttempts:       3,
   routerConfig:         null,
   collectionPrefix:     "",
   port:                 7531,
@@ -77,10 +87,14 @@ export function applyServerConfig(sc: ServerConfig, projectId?: string, agentId?
   cfg.embedApiKey      = sc.embed.api_key;
   cfg.embedDim         = sc.embed.dim;
   cfg.embedUrl         = sc.embed.url;
+  cfg.embedTimeout     = sc.embed.timeout;
+  cfg.embedMaxAttempts = sc.embed.max_attempts;
   cfg.llmProvider      = sc.llm.provider as RuntimeConfig["llmProvider"];
   cfg.llmModel         = sc.llm.model;
   cfg.llmApiKey        = sc.llm.api_key;
   cfg.llmUrl           = sc.llm.url;
+  cfg.llmTimeout       = sc.llm.timeout;
+  cfg.llmMaxAttempts   = sc.llm.max_attempts;
   cfg.routerConfig     = sc.router as RouterProviderSpec;
   cfg.collectionPrefix = sc.collection_prefix;
   cfg.port             = sc.port;

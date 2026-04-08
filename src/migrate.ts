@@ -29,13 +29,13 @@ function makeProgress(total: number) {
       `ETA ${Math.floor(etaSec / 60)}m${String(Math.ceil(etaSec % 60)).padStart(2, "0")}s`;
     const rateStr  = rate >= 1 ? `${Math.round(rate)} pts/s` : "…       ";
     process.stderr.write(
-      `\r  [${bar}] ${String(done).padStart(6)}/${total}  ${String(Math.round(pct * 100)).padStart(3)}%  ${rateStr}  ${eta}  `
+      `\\r  [${bar}] ${String(done).padStart(6)}/${total}  ${String(Math.round(pct * 100)).padStart(3)}%  ${rateStr}  ${eta}  `
     );
   }
 
   return {
     tick(n: number): void { done += n; render(false); },
-    finish():        void { done = total; render(true); process.stderr.write("\n"); },
+    finish():        void { done = total; render(true); process.stderr.write("\\n"); },
   };
 }
 
@@ -56,7 +56,7 @@ function buildEmbedCtx(p: Record<string, unknown>): string {
     p["jsdoc"]   ? `// ${p["jsdoc"]}` : "",
     p["signature"] ?? "",
     p["content"]   ?? "",
-  ].filter(Boolean).join("\n").slice(0, 4000);
+  ].filter(Boolean).join("\\n").slice(0, 4000);
 }
 
 /**
@@ -75,8 +75,8 @@ function readFreshContent(p: Record<string, unknown>, projectRoot: string): stri
   const absPath = projectRoot ? resolve(projectRoot, filePath) : filePath;
   if (!existsSync(absPath)) return (p["content"] as string | undefined) ?? "";
 
-  const lines   = readFileSync(absPath, "utf8").split("\n");
-  const content = lines.slice(Math.max(0, startLine - 1), endLine).join("\n");
+  const lines   = readFileSync(absPath, "utf8").split("\\n");
+  const content = lines.slice(Math.max(0, startLine - 1), endLine).join("\\n");
   return content || ((p["content"] as string | undefined) ?? "");
 }
 
@@ -86,7 +86,7 @@ async function embedWithModel(model: string, texts: string[], maxChars: number):
     method:  "POST",
     headers: { "Content-Type": "application/json" },
     body:    JSON.stringify({ model, input: truncated }),
-    signal:  AbortSignal.timeout(180_000),
+    signal:  AbortSignal.timeout(cfg.embedTimeout * 1000),
   });
   if (!resp.ok) {
     const body = await resp.text().catch(() => "");
@@ -182,10 +182,10 @@ export async function runMigrate(): Promise<void> {
 
   const qd = new QdrantClient({ url: cfg.qdrantUrl });
 
-  process.stderr.write(`[migrate] Probing dim for ${toModel}…\n`);
+  process.stderr.write(`[migrate] Probing dim for ${toModel}…\\n`);
   const newDim = await getDim(toModel);
-  process.stderr.write(`[migrate] dim=${newDim}\n`);
-  if (projectRoot) process.stderr.write(`[migrate] project-root: ${projectRoot}\n`);
+  process.stderr.write(`[migrate] dim=${newDim}\\n`);
+  if (projectRoot) process.stderr.write(`[migrate] project-root: ${projectRoot}\\n`);
 
   const { collections } = await qd.getCollections();
   const { aliases }     = await qd.getAliases();
@@ -195,14 +195,12 @@ export async function runMigrate(): Promise<void> {
   ]);
 
   // ── Memory collections ─────────────────────────────────────────────────────
-  // Collections are shared across all projects (isolated by project_id inside).
-  // Create dst if it doesn't exist yet, then always upsert into it.
   for (const base of MEMORY_COLS) {
     const srcName = colName(fromPrefix, base);
     const dstName = colName(toPrefix,   base);
 
     if (!existingNames.has(srcName)) {
-      process.stderr.write(`[migrate] Skipping ${srcName} — not found\n`);
+      process.stderr.write(`[migrate] Skipping ${srcName} — not found\\n`);
       continue;
     }
     if (!existingNames.has(dstName)) {
@@ -210,9 +208,9 @@ export async function runMigrate(): Promise<void> {
       existingNames.add(dstName);
     }
 
-    process.stderr.write(`[migrate] ${srcName} → ${dstName} (project_id=${projectId ?? "all"})…\n`);
+    process.stderr.write(`[migrate] ${srcName} → ${dstName} (project_id=${projectId ?? "all"})…\\n`);
     const points = await scrollAll(qd, srcName, projectId);
-    process.stderr.write(`[migrate] ${base}: ${points.length} pts → ${toModel} (dim=${newDim})\n`);
+    process.stderr.write(`[migrate] ${base}: ${points.length} pts → ${toModel} (dim=${newDim})\\n`);
     const memProgress = makeProgress(points.length);
 
     for (const batch of chunkArr(points, BATCH_SIZE)) {
@@ -228,7 +226,7 @@ export async function runMigrate(): Promise<void> {
     }
 
     memProgress.finish();
-    process.stderr.write(`[migrate] ${base}: done\n`);
+    process.stderr.write(`[migrate] ${base}: done\\n`);
   }
 
   // ── New memory collections (memory / memory_agents) ──────────────────────
@@ -237,7 +235,7 @@ export async function runMigrate(): Promise<void> {
     const dstName = colName(toPrefix,   base);
 
     if (!existingNames.has(srcName)) {
-      process.stderr.write(`[migrate] Skipping ${srcName} — not found\n`);
+      process.stderr.write(`[migrate] Skipping ${srcName} — not found\\n`);
       continue;
     }
     if (!existingNames.has(dstName)) {
@@ -245,9 +243,9 @@ export async function runMigrate(): Promise<void> {
       existingNames.add(dstName);
     }
 
-    process.stderr.write(`[migrate] ${srcName} → ${dstName} (project_id=${projectId ?? "all"})…\n`);
+    process.stderr.write(`[migrate] ${srcName} → ${dstName} (project_id=${projectId ?? "all"})…\\n`);
     const points   = await scrollAll(qd, srcName, projectId);
-    process.stderr.write(`[migrate] ${base}: ${points.length} pts → ${toModel} (dim=${newDim})\n`);
+    process.stderr.write(`[migrate] ${base}: ${points.length} pts → ${toModel} (dim=${newDim})\\n`);
     const progress = makeProgress(points.length);
 
     for (const batch of chunkArr(points, BATCH_SIZE)) {
@@ -262,35 +260,30 @@ export async function runMigrate(): Promise<void> {
     }
 
     progress.finish();
-    process.stderr.write(`[migrate] ${base}: done\n`);
+    process.stderr.write(`[migrate] ${base}: done\\n`);
   }
 
   // ── code_chunks ────────────────────────────────────────────────────────────
-  // Also shared across projects. Create dst if needed, then upsert by project_id.
   const srcCode = colName(fromPrefix, CODE_CHUNK);
   const dstCode = colName(toPrefix,   CODE_CHUNK);
 
   if (!existingNames.has(srcCode)) {
-    process.stderr.write(`[migrate] Skipping ${srcCode} — not found\n`);
+    process.stderr.write(`[migrate] Skipping ${srcCode} — not found\\n`);
   } else {
     if (!existingNames.has(dstCode)) {
       await createCodeChunkCol(qd, dstCode, newDim);
     }
 
-    process.stderr.write(`[migrate] ${srcCode} → ${dstCode} (project_id=${projectId ?? "all"})…\n`);
-    if (projectId) process.stderr.write(`[migrate] filtering by project_id=${projectId}\n`);
+    process.stderr.write(`[migrate] ${srcCode} → ${dstCode} (project_id=${projectId ?? "all"})…\\n`);
+    if (projectId) process.stderr.write(`[migrate] filtering by project_id=${projectId}\\n`);
     const points = await scrollAll(qd, srcCode, projectId);
-    process.stderr.write(`[migrate] code_chunks: ${points.length} pts → ${toModel} (dim=${newDim})\n`);
+    process.stderr.write(`[migrate] code_chunks: ${points.length} pts → ${toModel} (dim=${newDim})\\n`);
     const codeProgress = makeProgress(points.length);
 
     for (const batch of chunkArr(points, BATCH_SIZE)) {
       const payloads = batch.map((p) => (p.payload ?? {}) as Record<string, unknown>);
-
-      // Re-read content from disk; fallback to payload content if file missing
       const freshContents = payloads.map((p) => readFreshContent(p, projectRoot));
 
-      // Reuse existing description; generate via LLM only if missing + flag set.
-      // Sequential to avoid overwhelming Ollama.
       const descriptions: string[] = [];
       for (let i = 0; i < payloads.length; i++) {
         const existing = payloads[i]!["description"] as string | undefined;
@@ -331,8 +324,8 @@ export async function runMigrate(): Promise<void> {
     }
 
     codeProgress.finish();
-    process.stderr.write(`[migrate] code_chunks: done\n`);
+    process.stderr.write(`[migrate] code_chunks: done\\n`);
   }
 
-  process.stderr.write("[migrate] Done.\n");
+  process.stderr.write("[migrate] Done.\\n");
 }

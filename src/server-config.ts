@@ -3,19 +3,23 @@ import type { QdrantClient } from "@qdrant/js-client-rest";
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export interface LlmProviderConfig {
-  provider: "ollama" | "anthropic" | "openai" | "gemini";
-  model:    string;
-  api_key:  string;
-  url:      string;
-  fallback: LlmProviderConfig | null;
+  provider:     "ollama" | "anthropic" | "openai" | "gemini";
+  model:        string;
+  api_key:      string;
+  url:          string;
+  timeout:      number;
+  max_attempts: number;
+  fallback:     LlmProviderConfig | null;
 }
 
 export interface EmbedConfig {
-  provider: "ollama" | "openai" | "voyage";
-  model:    string;
-  api_key:  string;
-  dim:      number;
-  url:      string;
+  provider:     "ollama" | "openai" | "voyage";
+  model:        string;
+  api_key:      string;
+  dim:          number;
+  url:          string;
+  timeout:      number;
+  max_attempts: number;
 }
 
 export interface ServerConfig {
@@ -43,11 +47,13 @@ export interface ProjectConfig {
 // ── Defaults ──────────────────────────────────────────────────────────────────
 
 const DEFAULT_LLM: LlmProviderConfig = {
-  provider: "ollama", model: "gemma3n:e2b", api_key: "", url: "", fallback: null,
+  provider: "ollama", model: "gemma3n:e2b", api_key: "", url: "",
+  timeout: 120, max_attempts: 3, fallback: null,
 };
 
 const DEFAULT_EMBED: EmbedConfig = {
   provider: "ollama", model: "embeddinggemma:300m", api_key: "", dim: 768, url: "",
+  timeout: 120, max_attempts: 3,
 };
 
 export function mergeServerConfig(raw: Partial<ServerConfig>): ServerConfig {

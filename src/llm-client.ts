@@ -100,10 +100,12 @@ export function resolveBaseUrl(spec: RouterProviderSpec): string {
 /** Build a RouterProviderSpec from the global llm-* config keys (fallback when no router block). */
 export function defaultRouterSpec(): RouterProviderSpec {
   return {
-    provider: cfg.llmProvider as RouterProviderSpec["provider"],
-    model:    cfg.llmModel,
-    api_key:  cfg.llmApiKey || undefined,
-    url:      cfg.llmUrl    || undefined,
+    provider:     cfg.llmProvider as RouterProviderSpec["provider"],
+    model:        cfg.llmModel,
+    api_key:      cfg.llmApiKey || undefined,
+    url:          cfg.llmUrl    || undefined,
+    timeout:      cfg.llmTimeout,
+    max_attempts: cfg.llmMaxAttempts,
   };
 }
 
@@ -111,67 +113,69 @@ export function defaultRouterSpec(): RouterProviderSpec {
 
 /**
  * Single-turn LLM call, no tools. Used by router.ts.
- * Behaviorally identical to the old callProvider() in router.ts.
  */
 export async function callLlmSimple(
   prompt: string,
   spec:   RouterProviderSpec,
 ): Promise<string> {
+  const attempts = spec.max_attempts ?? cfg.llmMaxAttempts;
+  const timeout  = (spec.timeout ?? cfg.llmTimeout) * 1000;
+
   return _withRetry(() => {
     const apiKey  = resolveApiKey(spec);
     const baseUrl = resolveBaseUrl(spec);
     switch (spec.provider) {
-      case "anthropic": return _callAnthropicSimple(prompt, spec.model, apiKey, baseUrl, spec.max_tokens);
-      case "openai":    return _callOpenAISimple(prompt, spec.model, apiKey, baseUrl, spec.max_tokens);
-      case "gemini":    return _callGeminiSimple(prompt, spec.model, apiKey, baseUrl, spec.max_tokens);
-      default:          return _callOllamaSimple(prompt, spec.model, baseUrl);
+      case "anthropic": return _callAnthropicSimple(prompt, spec.model, apiKey, baseUrl, timeout, spec.max_tokens);
+      case "openai":    return _callOpenAISimple(prompt, spec.model, apiKey, baseUrl, timeout, spec.max_tokens);
+      case "gemini":    return _callGeminiSimple(prompt, spec.model, apiKey, baseUrl, timeout, spec.max_tokens);
+      default:          return _callOllamaSimple(prompt, spec.model, baseUrl, timeout);
     }
-  });
+  }, attempts);
 }
 
-async function _callOllamaSimple(prompt: string, model: string, baseUrl: string): Promise<string> {
+async function _callOllamaSimple(prompt: string, model: string, baseUrl: string, timeout: number): Promise<string> {
   const resp = await _fetchWithLogging(`${baseUrl}/api/generate`, {
     method:  "POST",
     headers: { "Content-Type": "application/json" },
     body:    JSON.stringify({ model, prompt, stream: false }),
-    signal:  AbortSignal.timeout(120_000),
+    signal:  AbortSignal.timeout(timeout),
   }, model);
   if (!resp.ok) { const b = await resp.text().catch(() => ""); throw new Error(`Ollama simple: ${resp.status} — ${b}`); }
   const data = await resp.json() as { response: string };
   return data.response;
 }
 
-async function _callOpenAISimple(prompt: string, model: string, apiKey: string, baseUrl: string, maxTokens?: number): Promise<string> {
+async function _callOpenAISimple(prompt: string, model: string, apiKey: string, baseUrl: string, timeout: number, maxTokens?: number): Promise<string> {
   const resp = await _fetchWithLogging(`${baseUrl}/v1/chat/completions`, {
     method:  "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
     body:    JSON.stringify({ model, messages: [{ role: "user", content: prompt }], max_tokens: maxTokens ?? MAX_TOKENS }),
-    signal:  AbortSignal.timeout(120_000),
+    signal:  AbortSignal.timeout(timeout),
   }, model);
   if (!resp.ok) { const b = await resp.text().catch(() => ""); throw new Error(`OpenAI simple: ${resp.status} — ${b}`); }
   const data = await resp.json() as { choices: { message: { content: string } }[] };
   return data.choices[0]?.message.content ?? "";
 }
 
-async function _callAnthropicSimple(prompt: string, model: string, apiKey: string, baseUrl: string, maxTokens?: number): Promise<string> {
+async function _callAnthropicSimple(prompt: string, model: string, apiKey: string, baseUrl: string, timeout: number, maxTokens?: number): Promise<string> {
   const resp = await _fetchWithLogging(`${baseUrl}/v1/messages`, {
     method:  "POST",
     headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
     body:    JSON.stringify({ model, max_tokens: maxTokens ?? MAX_TOKENS, messages: [{ role: "user", content: prompt }] }),
-    signal:  AbortSignal.timeout(120_000),
+    signal:  AbortSignal.timeout(timeout),
   }, model);
   if (!resp.ok) { const b = await resp.text().catch(() => ""); throw new Error(`Anthropic simple: ${resp.status} — ${b}`); }
   const data = await resp.json() as { content: { type: string; text: string }[] };
   return data.content[0]?.text ?? "";
 }
 
-async function _callGeminiSimple(prompt: string, model: string, apiKey: string, baseUrl: string, maxTokens?: number): Promise<string> {
+async function _callGeminiSimple(prompt: string, model: string, apiKey: string, baseUrl: string, timeout: number, maxTokens?: number): Promise<string> {
   const url = `${baseUrl}/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
   const resp = await _fetchWithLogging(url, {
     method:  "POST",
     headers: { "Content-Type": "application/json" },
     body:    JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { maxOutputTokens: maxTokens ?? MAX_TOKENS } }),
-    signal:  AbortSignal.timeout(120_000),
+    signal:  AbortSignal.timeout(timeout),
   }, model);
   if (!resp.ok) { const b = await resp.text().catch(() => ""); throw new Error(`Gemini simple: ${resp.status} — ${b}`); }
   const data = await resp.json() as { candidates: { content: { parts: { text: string }[] } }[] };
@@ -181,10 +185,7 @@ async function _callGeminiSimple(prompt: string, model: string, apiKey: string, 
 // ── Tool-enabled call ─────────────────────────────────────────────────────────
 
 /**
- * Single-round tool-calling call. The LLM may call one tool; we execute it
- * and send the result back. Returns the LLM's final text response.
- *
- * toolExecutor receives (toolName, args) and returns a JSON string to feed back.
+ * Single-round tool-calling call.
  */
 export async function callLlmWithTools(
   userMessage:  string,
@@ -193,16 +194,19 @@ export async function callLlmWithTools(
   toolExecutor: (name: string, args: Record<string, unknown>) => Promise<string>,
   spec:         RouterProviderSpec,
 ): Promise<string> {
+  const attempts = spec.max_attempts ?? cfg.llmMaxAttempts;
+  const timeout  = (spec.timeout ?? cfg.llmTimeout) * 1000;
+
   return _withRetry(() => {
     const apiKey  = resolveApiKey(spec);
     const baseUrl = resolveBaseUrl(spec);
     switch (spec.provider) {
-      case "anthropic": return _callAnthropicWithTools(userMessage, systemPrompt, tools, toolExecutor, spec.model, apiKey, baseUrl);
-      case "openai":    return _callOpenAIWithTools(userMessage, systemPrompt, tools, toolExecutor, spec.model, apiKey, baseUrl);
-      case "gemini":    return _callGeminiWithTools(userMessage, systemPrompt, tools, toolExecutor, spec.model, apiKey, baseUrl);
-      default:          return _callOllamaWithTools(userMessage, systemPrompt, tools, toolExecutor, spec.model, baseUrl);
+      case "anthropic": return _callAnthropicWithTools(userMessage, systemPrompt, tools, toolExecutor, spec.model, apiKey, baseUrl, timeout);
+      case "openai":    return _callOpenAIWithTools(userMessage, systemPrompt, tools, toolExecutor, spec.model, apiKey, baseUrl, timeout);
+      case "gemini":    return _callGeminiWithTools(userMessage, systemPrompt, tools, toolExecutor, spec.model, apiKey, baseUrl, timeout);
+      default:          return _callOllamaWithTools(userMessage, systemPrompt, tools, toolExecutor, spec.model, baseUrl, timeout);
     }
-  });
+  }, attempts);
 }
 
 // ── Ollama tool calling ───────────────────────────────────────────────────────
@@ -214,6 +218,7 @@ async function _callOllamaWithTools(
   toolExecutor: (name: string, args: Record<string, unknown>) => Promise<string>,
   model:        string,
   baseUrl:      string,
+  timeout:      number,
 ): Promise<string> {
   const toolDefs = tools.map(t => ({ type: "function" as const, function: { name: t.name, description: t.description, parameters: t.parameters } }));
   const msgs1 = [{ role: "system", content: systemPrompt }, { role: "user", content: userMessage }];
@@ -221,7 +226,7 @@ async function _callOllamaWithTools(
   const resp1 = await _fetchWithLogging(`${baseUrl}/api/chat`, {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ model, messages: msgs1, tools: toolDefs, stream: false }),
-    signal: AbortSignal.timeout(120_000),
+    signal: AbortSignal.timeout(timeout),
   }, model);
   if (!resp1.ok) { const b = await resp1.text().catch(() => ""); throw new Error(`Ollama tools: ${resp1.status} — ${b}`); }
   const data1 = await resp1.json() as { message: { content: string; tool_calls?: { function: { name: string; arguments: Record<string, unknown> } }[] } };
@@ -241,7 +246,7 @@ async function _callOllamaWithTools(
   const resp2 = await _fetchWithLogging(`${baseUrl}/api/chat`, {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ model, messages: msgs2, stream: false }),
-    signal: AbortSignal.timeout(120_000),
+    signal: AbortSignal.timeout(timeout),
   }, model);
   if (!resp2.ok) { const b = await resp2.text().catch(() => ""); throw new Error(`Ollama tool result: ${resp2.status} — ${b}`); }
   const data2 = await resp2.json() as { message: { content: string } };
@@ -258,6 +263,7 @@ async function _callOpenAIWithTools(
   model:        string,
   apiKey:       string,
   baseUrl:      string,
+  timeout:      number,
 ): Promise<string> {
   const headers = { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` };
   const toolDefs = tools.map(t => ({ type: "function" as const, function: { name: t.name, description: t.description, parameters: t.parameters } }));
@@ -266,7 +272,7 @@ async function _callOpenAIWithTools(
   const resp1 = await _fetchWithLogging(`${baseUrl}/v1/chat/completions`, {
     method: "POST", headers,
     body: JSON.stringify({ model, messages: msgs1, tools: toolDefs, max_tokens: MAX_TOKENS }),
-    signal: AbortSignal.timeout(120_000),
+    signal: AbortSignal.timeout(timeout),
   }, model);
   if (!resp1.ok) { const b = await resp1.text().catch(() => ""); throw new Error(`OpenAI tools: ${resp1.status} — ${b}`); }
   const data1 = await resp1.json() as { choices: { message: { content: string | null; tool_calls?: { id: string; function: { name: string; arguments: string } }[] } }[] };
@@ -293,7 +299,7 @@ async function _callOpenAIWithTools(
   const resp2 = await _fetchWithLogging(`${baseUrl}/v1/chat/completions`, {
     method: "POST", headers,
     body: JSON.stringify({ model, messages: msgs2, max_tokens: MAX_TOKENS }),
-    signal: AbortSignal.timeout(120_000),
+    signal: AbortSignal.timeout(timeout),
   }, model);
   if (!resp2.ok) { const b = await resp2.text().catch(() => ""); throw new Error(`OpenAI tool result: ${resp2.status} — ${b}`); }
   const data2 = await resp2.json() as { choices: { message: { content: string } }[] };
@@ -310,6 +316,7 @@ async function _callAnthropicWithTools(
   model:        string,
   apiKey:       string,
   baseUrl:      string,
+  timeout:      number,
 ): Promise<string> {
   const headers = { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" };
   const toolDefs = tools.map(t => ({ name: t.name, description: t.description, input_schema: t.parameters }));
@@ -317,7 +324,7 @@ async function _callAnthropicWithTools(
   const resp1 = await _fetchWithLogging(`${baseUrl}/v1/messages`, {
     method: "POST", headers,
     body: JSON.stringify({ model, max_tokens: MAX_TOKENS, system: systemPrompt, tools: toolDefs, messages: [{ role: "user", content: userMessage }] }),
-    signal: AbortSignal.timeout(120_000),
+    signal: AbortSignal.timeout(timeout),
   }, model);
   if (!resp1.ok) { const b = await resp1.text().catch(() => ""); throw new Error(`Anthropic tools: ${resp1.status} — ${b}`); }
   const data1 = await resp1.json() as { content: { type: string; text?: string; id?: string; name?: string; input?: Record<string, unknown> }[]; stop_reason: string };
@@ -344,7 +351,7 @@ async function _callAnthropicWithTools(
         { role: "user",      content: [{ type: "tool_result", tool_use_id: toolUse.id, content: toolResult }] },
       ],
     }),
-    signal: AbortSignal.timeout(120_000),
+    signal: AbortSignal.timeout(timeout),
   }, model);
   if (!resp2.ok) { const b = await resp2.text().catch(() => ""); throw new Error(`Anthropic tool result: ${resp2.status} — ${b}`); }
   const data2 = await resp2.json() as { content: { type: string; text?: string }[] };
@@ -361,6 +368,7 @@ async function _callGeminiWithTools(
   model:        string,
   apiKey:       string,
   baseUrl:      string,
+  timeout:      number,
 ): Promise<string> {
   const url = `${baseUrl}/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
   const toolDefs = { tools: [{ function_declarations: tools.map(t => ({ name: t.name, description: t.description, parameters: t.parameters })) }] };
@@ -372,7 +380,7 @@ async function _callGeminiWithTools(
   const resp1 = await _fetchWithLogging(url, {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ contents: contents1, ...toolDefs, ...genCfg }),
-    signal: AbortSignal.timeout(120_000),
+    signal: AbortSignal.timeout(timeout),
   }, model);
   if (!resp1.ok) { const b = await resp1.text().catch(() => ""); throw new Error(`Gemini tools: ${resp1.status} — ${b}`); }
   const data1 = await resp1.json() as {
@@ -400,7 +408,7 @@ async function _callGeminiWithTools(
   const resp2 = await _fetchWithLogging(url, {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ contents: contents2, ...toolDefs, ...genCfg }),
-    signal: AbortSignal.timeout(120_000),
+    signal: AbortSignal.timeout(timeout),
   }, model);
   if (!resp2.ok) { const b = await resp2.text().catch(() => ""); throw new Error(`Gemini tool result: ${resp2.status} — ${b}`); }
   const data2 = await resp2.json() as { candidates: { content: { parts: { text?: string }[] } }[] };
@@ -418,25 +426,28 @@ export async function callLlmTool(
   tool: ToolDef,
   spec: RouterProviderSpec,
 ): Promise<Record<string, unknown> | null> {
+  const attempts = spec.max_attempts ?? cfg.llmMaxAttempts;
+  const timeout  = (spec.timeout ?? cfg.llmTimeout) * 1000;
+
   return _withRetry(() => {
     const apiKey  = resolveApiKey(spec);
     const baseUrl = resolveBaseUrl(spec);
     switch (spec.provider) {
-      case "anthropic": return _callAnthropicTool(prompt, tool, spec.model, apiKey, baseUrl);
-      case "openai":    return _callOpenAITool(prompt, tool, spec.model, apiKey, baseUrl);
-      case "gemini":    return _callGeminiTool(prompt, tool, spec.model, apiKey, baseUrl);
-      default:          return _callOllamaTool(prompt, tool, spec.model, baseUrl);
+      case "anthropic": return _callAnthropicTool(prompt, tool, spec.model, apiKey, baseUrl, timeout);
+      case "openai":    return _callOpenAITool(prompt, tool, spec.model, apiKey, baseUrl, timeout);
+      case "gemini":    return _callGeminiTool(prompt, tool, spec.model, apiKey, baseUrl, timeout);
+      default:          return _callOllamaTool(prompt, tool, spec.model, baseUrl, timeout);
     }
-  });
+  }, attempts);
 }
 
-async function _callOllamaTool(prompt: string, tool: ToolDef, model: string, baseUrl: string): Promise<Record<string, unknown> | null> {
+async function _callOllamaTool(prompt: string, tool: ToolDef, model: string, baseUrl: string, timeout: number): Promise<Record<string, unknown> | null> {
   const toolDefs = [{ type: "function" as const, function: { name: tool.name, description: tool.description, parameters: tool.parameters } }];
   const msgs = [{ role: "user", content: prompt }];
   const resp = await _fetchWithLogging(`${baseUrl}/api/chat`, {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ model, messages: msgs, tools: toolDefs, stream: false }),
-    signal: AbortSignal.timeout(120_000),
+    signal: AbortSignal.timeout(timeout),
   }, model);
   if (!resp.ok) { const b = await resp.text().catch(() => ""); throw new Error(`Ollama tool structured: ${resp.status} — ${b}`); }
   const data = await resp.json() as { message: { tool_calls?: { function: { name: string; arguments: Record<string, unknown> } }[] } };
@@ -445,14 +456,14 @@ async function _callOllamaTool(prompt: string, tool: ToolDef, model: string, bas
   return null;
 }
 
-async function _callOpenAITool(prompt: string, tool: ToolDef, model: string, apiKey: string, baseUrl: string): Promise<Record<string, unknown> | null> {
+async function _callOpenAITool(prompt: string, tool: ToolDef, model: string, apiKey: string, baseUrl: string, timeout: number): Promise<Record<string, unknown> | null> {
   const headers = { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` };
   const toolDefs = [{ type: "function" as const, function: { name: tool.name, description: tool.description, parameters: tool.parameters } }];
   const msgs = [{ role: "user", content: prompt }];
   const resp = await _fetchWithLogging(`${baseUrl}/v1/chat/completions`, {
     method: "POST", headers,
     body: JSON.stringify({ model, messages: msgs, tools: toolDefs, tool_choice: { type: "function", function: { name: tool.name } }, max_tokens: MAX_TOKENS }),
-    signal: AbortSignal.timeout(120_000),
+    signal: AbortSignal.timeout(timeout),
   }, model);
   if (!resp.ok) { const b = await resp.text().catch(() => ""); throw new Error(`OpenAI tool structured: ${resp.status} — ${b}`); }
   const data = await resp.json() as { choices: { message: { tool_calls?: { function: { name: string; arguments: string } }[] } }[] };
@@ -463,13 +474,13 @@ async function _callOpenAITool(prompt: string, tool: ToolDef, model: string, api
   return null;
 }
 
-async function _callAnthropicTool(prompt: string, tool: ToolDef, model: string, apiKey: string, baseUrl: string): Promise<Record<string, unknown> | null> {
+async function _callAnthropicTool(prompt: string, tool: ToolDef, model: string, apiKey: string, baseUrl: string, timeout: number): Promise<Record<string, unknown> | null> {
   const headers = { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" };
   const toolDefs = [{ name: tool.name, description: tool.description, input_schema: tool.parameters }];
   const resp = await _fetchWithLogging(`${baseUrl}/v1/messages`, {
     method: "POST", headers,
     body: JSON.stringify({ model, max_tokens: MAX_TOKENS, tools: toolDefs, tool_choice: { type: "tool", name: tool.name }, messages: [{ role: "user", content: prompt }] }),
-    signal: AbortSignal.timeout(120_000),
+    signal: AbortSignal.timeout(timeout),
   }, model);
   if (!resp.ok) { const b = await resp.text().catch(() => ""); throw new Error(`Anthropic tool structured: ${resp.status} — ${b}`); }
   const data = await resp.json() as { content: { type: string; name?: string; input?: Record<string, unknown> }[] };
@@ -477,7 +488,7 @@ async function _callAnthropicTool(prompt: string, tool: ToolDef, model: string, 
   return toolUse?.input ?? null;
 }
 
-async function _callGeminiTool(prompt: string, tool: ToolDef, model: string, apiKey: string, baseUrl: string): Promise<Record<string, unknown> | null> {
+async function _callGeminiTool(prompt: string, tool: ToolDef, model: string, apiKey: string, baseUrl: string, timeout: number): Promise<Record<string, unknown> | null> {
   const url = `${baseUrl}/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
   const toolDefs = { tools: [{ function_declarations: [{ name: tool.name, description: tool.description, parameters: tool.parameters }] }] };
   const toolConfig = { toolConfig: { functionCallingConfig: { mode: "ANY", allowedFunctionNames: [tool.name] } } };
@@ -486,7 +497,7 @@ async function _callGeminiTool(prompt: string, tool: ToolDef, model: string, api
   const resp = await _fetchWithLogging(url, {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ contents, ...toolDefs, ...toolConfig, ...genCfg }),
-    signal: AbortSignal.timeout(120_000),
+    signal: AbortSignal.timeout(timeout),
   }, model);
   if (!resp.ok) { const b = await resp.text().catch(() => ""); throw new Error(`Gemini tool structured: ${resp.status} — ${b}`); }
   const data = await resp.json() as { candidates: { content: { parts: Array<{ functionCall?: { name: string; args: Record<string, unknown> } }> } }[] };
