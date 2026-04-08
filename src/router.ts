@@ -45,7 +45,16 @@ const RECORD_MEMORY_TOOL: ToolDef = {
         items: {
           type: "object",
           properties: {
-            text: { type: "string", description: "Clear and descriptive text without needing full context" },
+            text: {
+              type: "string",
+              description: `Self-contained memory entry. Use structured format based on status:
+- resolved (bug/incident/fix): "Problem: <what went wrong>\nRoot cause: <why it happened>\nFix: <what resolved it>\nFiles: src/path/to/file.ts"
+- observation: "Observed: <what was noticed>\nContext: <when/where>\nImpact: <why it matters>"
+- open_question: "Question: <what is unclear>\nContext: <background>\nAttempted: <what was tried, if anything>"
+- in_progress: plain descriptive text explaining what is being worked on and why
+- hypothesis: plain descriptive text with the proposed idea and its rationale
+Always include enough context to be understood without the original conversation.`,
+            },
             status: { type: "string", enum: ["in_progress", "resolved", "open_question", "hypothesis", "observation"] },
             confidence: { type: "number", description: "Confidence score 0.0-1.0 (must be > 0.6)" }
           },

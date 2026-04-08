@@ -219,7 +219,7 @@ function _buildSystemPrompt(profile: ProjectProfile | null): string {
     "2. ANSWER DETECTION: If the current message is an answer to a previous question from the assistant, search for that question or related issues to find context.",
     "3. RESOLUTION HINTS: If the current message addresses an 'open_question' or 'hypothesis', mention it so the assistant can resolve it.",
     "",
-    "Use search_memory to find context. Be specific in your query. Return a concise summary of findings (markdown). If nothing relevant is found, return an empty string.",
+    "Use search_memory to find context. Be specific in your query. Return your full analysis of the findings: what you found, what each status entry means for the current task, and any unresolved questions. Do not compress findings — depth is more valuable than brevity. If nothing relevant is found, return an empty string.",
   ].join("\n");
 }
 

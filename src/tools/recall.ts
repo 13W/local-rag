@@ -23,9 +23,11 @@ export async function recallTool(a: RecallArgs): Promise<string> {
   const memTypes: string[] =
     a.memory_type === "episodic" ||
     a.memory_type === "semantic" ||
-    a.memory_type === "procedural"
+    a.memory_type === "procedural" ||
+    a.memory_type === "memory" ||
+    a.memory_type === "memory_agents"
       ? [a.memory_type]
-      : ["episodic", "semantic", "procedural"];
+      : ["episodic", "semantic", "procedural", "memory", "memory_agents"];
   const collections = memTypes.map(colForType);
 
   const mustFilters: Array<{ key: string; match: { value: string } }> = [
@@ -58,7 +60,7 @@ export async function recallTool(a: RecallArgs): Promise<string> {
     debugLog("recall", `  ${collections[ci]} → ${hits.length} hits`);
     for (const hit of hits) {
       const p    = (hit.payload ?? {}) as Record<string, unknown>;
-      const text = String(p["content"] ?? "").slice(0, 80);
+      const text = String(p["text"] ?? p["content"] ?? "").slice(0, 80);
       debugLog("recall", `    score=${hit.score.toFixed(3)} "${text}"`);
     }
   }
@@ -100,7 +102,7 @@ export async function recallTool(a: RecallArgs): Promise<string> {
         ? (p["tags"] as string[]).map((t) => `#${t}`).join(" ")
         : "";
 
-      results.push([score, mt, hit.id, String(p["content"] ?? ""), tagStr, createdAt.slice(0, 10)]);
+      results.push([score, mt, hit.id, String(p["text"] ?? p["content"] ?? ""), tagStr, createdAt.slice(0, 10)]);
     }
   }
 
