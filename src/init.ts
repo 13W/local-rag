@@ -85,8 +85,8 @@ async function configureClaudeHooks(projectId: string, agentId: string, serverUr
 
   const hooks = (settings["hooks"] ?? {}) as Record<string, unknown[]>;
   // For Claude Code: UserPromptSubmit for recall, Stop for remember
-  hooks["UserPromptSubmit"] = [{ matcher: ".*", hooks: [{ type: "command", command: "local-rag hook-recall" }] }];
-  hooks["Stop"]             = [{ hooks: [{ type: "command", command: "local-rag hook-remember" }] }];
+  hooks["UserPromptSubmit"] = [{ matcher: ".*", hooks: [{ type: "command", command: `local-rag hook-recall --project ${projectId} --agent ${agentId}` }] }];
+  hooks["Stop"]             = [{ hooks: [{ type: "command", command: `local-rag hook-remember --project ${projectId} --agent ${agentId}` }] }];
   
   // Clean up old hooks if any
   delete hooks["PreToolUse"];
@@ -117,8 +117,8 @@ async function configureGeminiHooks(projectId: string, agentId: string, serverUr
 
   const hooks = (settings["hooks"] ?? {}) as Record<string, unknown[]>;
   // For Gemini CLI: BeforeAgent for recall, AfterAgent for remember
-  hooks["BeforeAgent"] = [{ matcher: ".*", hooks: [{ type: "command", command: "local-rag hook-recall" }] }];
-  hooks["AfterAgent"]  = [{ hooks: [{ type: "command", command: "local-rag hook-remember" }] }];
+  hooks["BeforeAgent"] = [{ matcher: ".*", hooks: [{ type: "command", command: `local-rag hook-recall --project ${projectId} --agent ${agentId}` }] }];
+  hooks["AfterAgent"]  = [{ hooks: [{ type: "command", command: `local-rag hook-remember --project ${projectId} --agent ${agentId}` }] }];
   settings["hooks"] = hooks;
 
   writeFileSync(settingsPath, JSON.stringify(settings, null, 2), "utf8");
