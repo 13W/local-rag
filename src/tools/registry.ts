@@ -10,6 +10,7 @@ import { projectOverviewTool }  from "./project_overview.js";
 import { getSymbolTool }        from "./get_symbol.js";
 import { findUsagesTool }       from "./find_usages.js";
 import { requestValidationTool } from "./request-validation.js";
+import { giveFeedbackTool }      from "./give_feedback.js";
 import type { Status }           from "../types.js";
 
 // ── Tool definitions (JSON Schema) ──────────────────────────────────────────
@@ -193,6 +194,28 @@ export const TOOLS = [
       required: ["proposed_text", "proposed_status", "question"],
     },
   },
+  {
+    name: "give_feedback",
+    description:
+      "Record feedback about MCP tools and hooks used in this session.\n\n" +
+      "Call at the end of a session with your honest assessment:\n" +
+      "- Which tools did you use, and were they helpful?\n" +
+      "- Did you read and act on context injected by UserPromptSubmit / SessionStart hooks?\n" +
+      "  Or did you ignore it and start from scratch? Why?\n" +
+      "- What would make the system more useful in future sessions?\n\n" +
+      "Args:\n" +
+      "  content: Markdown feedback — no restrictions on length or format\n" +
+      "  session_id: Session ID from the SessionEnd hook message (optional)",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        content:    { type: "string", description: "Markdown feedback (no restrictions)" },
+        session_id: { type: "string", description: "Session ID (optional)", default: "" },
+        agent_type: { type: "string", description: "Agent type hint (optional)", default: "" },
+      },
+      required: ["content"],
+    },
+  },
 ];
 
 // Fast name→tool lookup used for validation
@@ -305,6 +328,13 @@ export async function dispatchTool(name: string, a: Record<string, unknown>): Pr
       proposed_status: str(a["proposed_status"]) as Status,
       similar_entry:   str(a["similar_entry"],   ""),
       question:        str(a["question"]),
+    });
+  }
+  if (name === "give_feedback") {
+    return giveFeedbackTool({
+      content:    str(a["content"]),
+      session_id: str(a["session_id"], ""),
+      agent_type: str(a["agent_type"], ""),
     });
   }
   return `unknown tool: ${name}`;
