@@ -19,6 +19,12 @@ if (cmd === "serve" || cmd === "server") {
 } else if (cmd === "hook-remember") {
   const { runHookRemember } = await import("./hook-remember.js");
   await runHookRemember();
+} else if (cmd === "hook-session-start") {
+  const { runHookSessionStart } = await import("./hook-session-start.js");
+  await runHookSessionStart();
+} else if (cmd === "hook-session-end") {
+  const { runHookSessionEnd } = await import("./hook-session-end.js");
+  await runHookSessionEnd();
 } else {
   await import("./indexer/cli.js");
 }
