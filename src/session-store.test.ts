@@ -1,5 +1,7 @@
-import { describe, it, expect } from "vitest";
-import { getSession, setSession } from "./session-store.js";
+import { describe, it, expect, beforeEach } from "vitest";
+import { setSession, getSession, clearStore } from "./session-store.js";
+
+beforeEach(() => clearStore());
 
 describe("SessionStore", () => {
   it("returns undefined when nothing stored", () => {

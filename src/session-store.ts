@@ -41,3 +41,8 @@ export function getSession(projectId: string, agentId: string): string | undefin
   }
   return info.sessionId;
 }
+
+/** Clear all stored sessions. For testing only. */
+export function clearStore(): void {
+  store.clear();
+}
