@@ -553,7 +553,7 @@ export async function dashboardPlugin(fastify: FastifyInstance): Promise<void> {
         const result = await _dispatch!(tool, args);
         const ms = Date.now() - t0;
         record(tool, "playground", JSON.stringify(args).length, result.length, ms, true);
-        return reply.send({ result });
+        return reply.send({ ok: true, result, ms });
       } catch (err: unknown) {
         const ms = Date.now() - t0;
         record(tool, "playground", JSON.stringify(args).length, 0, ms, false, String(err));

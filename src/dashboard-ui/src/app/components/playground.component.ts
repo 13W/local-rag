@@ -102,7 +102,7 @@ export class PlaygroundComponent {
     for (const key of this.propKeys()) {
       const p = this.getProp(key); const v = this.getVal(key);
       if (p.type === "boolean") {
-        args[key] = v === true || v === "true";
+        args[key] = this.isChecked(key);
       } else if (p.type === "number" || p.type === "integer") {
         if (v !== "" && v !== undefined) args[key] = Number(v);
       } else {
