@@ -3,46 +3,24 @@ interface SessionInfo {
   expiresAt: number;
 }
 
-const TTL_MS = 3_600_000; // 1 hour
+const TTL_MS = 3_600_000;
 
 const store = new Map<string, SessionInfo>();
 
-function key(projectId: string, agentId: string): string {
-  return `${projectId}:${agentId}`;
+export function setSession(projectId: string, sessionId: string, ttlMs = TTL_MS): void {
+  store.set(projectId, { sessionId, expiresAt: Date.now() + ttlMs });
 }
 
-/**
- * Store a session_id for the given project/agent pair.
- * ttlMs overrides the default 1h TTL (useful for tests).
- */
-export function setSession(
-  projectId: string,
-  agentId: string,
-  sessionId: string,
-  ttlMs = TTL_MS,
-): void {
-  store.set(key(projectId, agentId), {
-    sessionId,
-    expiresAt: Date.now() + ttlMs,
-  });
-}
-
-/**
- * Retrieve the stored session_id. Returns undefined if not found or expired.
- * Evicts expired entries on read.
- */
-export function getSession(projectId: string, agentId: string): string | undefined {
-  const k = key(projectId, agentId);
-  const info = store.get(k);
+export function getSession(projectId: string): string | undefined {
+  const info = store.get(projectId);
   if (!info) return undefined;
   if (Date.now() > info.expiresAt) {
-    store.delete(k);
+    store.delete(projectId);
     return undefined;
   }
   return info.sessionId;
 }
 
-/** Clear all stored sessions. For testing only. */
 export function clearStore(): void {
   store.clear();
 }
