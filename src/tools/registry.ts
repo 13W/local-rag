@@ -2,12 +2,10 @@ import { rememberTool }         from "./remember.js";
 import { recallTool }           from "./recall.js";
 import { searchCodeTool }       from "./search_code.js";
 import { forgetTool }           from "./forget.js";
-import { consolidateTool }      from "./consolidate.js";
 import { statsTool }            from "./stats.js";
 import { getFileContextTool }   from "./get_file_context.js";
 import { getDependenciesTool }  from "./get_dependencies.js";
 import { projectOverviewTool }  from "./project_overview.js";
-import { getSymbolTool }        from "./get_symbol.js";
 import { findUsagesTool }       from "./find_usages.js";
 import { requestValidationTool } from "./request-validation.js";
 import { giveFeedbackTool }      from "./give_feedback.js";
@@ -72,23 +70,12 @@ export const TOOLS = [
     },
   },
   {
-    name: "get_symbol",
-    description: "Retrieve a symbol by its UUID from search_code results. Direct Qdrant lookup — no file I/O.\n\nArgs:\n  symbol_id: UUID of the symbol (from search_code `id:` field)",
-    inputSchema: {
-      type: "object" as const,
-      properties: {
-        symbol_id: { type: "string", description: "UUID of the symbol from search_code results" },
-      },
-      required: ["symbol_id"],
-    },
-  },
-  {
     name: "find_usages",
-    description: "Find symbols that reference or use a given symbol. Two-leg search: lexical (name/content match) + semantic (similar meaning). Merged by UUID, lexical hits first.\n\nArgs:\n  symbol_id: UUID of the symbol (from search_code or get_symbol)\n  limit: Max results (1–50, default 20)",
+    description: "Find symbols that reference or use a given symbol. Two-leg search: lexical (name/content match) + semantic (similar meaning). Merged by UUID, lexical hits first.\n\nArgs:\n  symbol_id: UUID of the symbol (from search_code)\n  limit: Max results (1–50, default 20)",
     inputSchema: {
       type: "object" as const,
       properties: {
-        symbol_id: { type: "string",  description: "UUID of the symbol (from search_code or get_symbol)" },
+        symbol_id: { type: "string",  description: "UUID of the symbol (from search_code)" },
         limit:     { type: "integer", description: "Max results (1–50)", default: 20 },
       },
       required: ["symbol_id"],
@@ -103,20 +90,6 @@ export const TOOLS = [
         memory_id: { type: "string", description: "UUID of the memory to delete" },
       },
       required: ["memory_id"],
-    },
-  },
-  {
-    name: "consolidate",
-    description: "Consolidate similar memories (like sleep for the brain).\\n\\nArgs:\\n  source: Source memory type\\n  target: Target memory type for merged records\\n  similarity_threshold: Cosine similarity threshold (0.0-1.0)\\n  dry_run: True = preview only, False = execute",
-    inputSchema: {
-      type: "object" as const,
-      properties: {
-        source:               { type: "string",  description: "episodic | semantic | procedural | memory | memory_agents", default: "episodic", enum: ["episodic", "semantic", "procedural", "memory", "memory_agents"] },
-        target:               { type: "string",  description: "episodic | semantic | procedural | memory | memory_agents", default: "semantic", enum: ["episodic", "semantic", "procedural", "memory", "memory_agents"] },
-        similarity_threshold: { type: "number",  description: "Cosine similarity threshold 0.0–1.0", default: 0.85 },
-        dry_run:              { type: "boolean", description: "Preview without executing", default: true },
-      },
-      required: [],
     },
   },
   {
@@ -280,9 +253,6 @@ export async function dispatchTool(name: string, a: Record<string, unknown>): Pr
       branch:       str(a["branch"],       ""),
     });
   }
-  if (name === "get_symbol") {
-    return getSymbolTool({ symbol_id: str(a["symbol_id"]) });
-  }
   if (name === "find_usages") {
     return findUsagesTool({
       symbol_id: str(a["symbol_id"]),
@@ -291,14 +261,6 @@ export async function dispatchTool(name: string, a: Record<string, unknown>): Pr
   }
   if (name === "forget") {
     return forgetTool({ memory_id: str(a["memory_id"]) });
-  }
-  if (name === "consolidate") {
-    return consolidateTool({
-      source:               str(a["source"],               "episodic"),
-      target:               str(a["target"],               "semantic"),
-      similarity_threshold: num(a["similarity_threshold"], 0.85),
-      dry_run:              bool(a["dry_run"],              true),
-    });
   }
   if (name === "stats") {
     return statsTool();

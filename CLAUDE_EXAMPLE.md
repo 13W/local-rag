@@ -2,7 +2,7 @@
 
 ## You are connected to a shared memory and RAG system via MCP
 
-You have 11 tools: `recall`, `remember`, `search_code`, `get_symbol`, `find_usages`, `get_file_context`, `get_dependencies`, `project_overview`, `forget`, `consolidate`, `stats`.
+You have 9 tools: `recall`, `remember`, `search_code`, `find_usages`, `get_file_context`, `get_dependencies`, `project_overview`, `forget`, `stats`.
 Other agents are connected to the same memory — you share a common project-scope.
 
 ---
@@ -25,9 +25,6 @@ search_code(query="what you are looking for")
 ```
 Semantic RAG over the indexed codebase.
 
-> ❌ Do NOT substitute `mcp__serena__search_for_pattern` for `search_code`.
-> Serena's pattern search is regex-only, requires an active project, and does not understand meaning.
-> Use `search_code` first — then use Serena to read/edit specific symbols once you know their names.
 
 When to recall:
 - Before changing any code — look for patterns and past solutions
@@ -68,7 +65,6 @@ Search modes (`search_mode`):
 **Symbol-level navigation via UUID:**
 Every `search_code` result includes an `id:` UUID. Use it to jump directly to the symbol or find its callers:
 ```
-get_symbol("abc-123-...")          # retrieve full symbol — name, sig, content, file:line — no file I/O
 find_usages("abc-123-...", limit=20)  # find callers/references: [lexical] + [semantic], self-excluded
 ```
 
@@ -89,58 +85,6 @@ get_dependencies(file_path="src/auth/jwt.ts", depth=3)                  # transi
 
 ---
 
-### WORKING WITH SERENA
-
-Serena provides filesystem access and precise symbolic code editing.
-This MCP provides semantic search and memory.
-**They complement each other — use both.**
-
-#### Division of responsibilities
-
-| Task | Use |
-|------|-----|
-| Find code by meaning / concept | `search_code` (this MCP) |
-| Find a symbol by exact name | Serena `find_symbol` |
-| Retrieve symbol by UUID (fast, no I/O) | `get_symbol(uuid)` (this MCP) |
-| Find callers / references of a symbol | `find_usages(uuid)` (this MCP) |
-| Understand project structure | `project_overview` (this MCP) |
-| Read a specific file / symbol body | Serena `find_symbol(include_body=True)` or `get_file_context` |
-| Check what imports a file | `get_dependencies` (this MCP) |
-| Find all references to a symbol | Serena `find_referencing_symbols` |
-| Edit / replace a symbol | Serena `replace_symbol_body` |
-| Rename a symbol across codebase | Serena `rename_symbol` |
-| Store a decision or pattern | `remember` (this MCP) |
-| Retrieve past decisions | `recall` (this MCP) |
-
-#### Recommended workflow
-
-```
-# 1. Orient (this MCP)
-project_overview()
-recall(query="task keywords")
-
-# 2. Find (this MCP → Serena)
-search_code(query="what you're looking for")   # semantic discovery
-find_symbol("SymbolName", include_body=True)   # precise read once you know the name
-
-# 3. Assess impact (this MCP)
-get_dependencies(file_path="src/found/file.ts", direction="imported_by")
-
-# 4. Edit (Serena)
-find_referencing_symbols("SymbolName", ...)    # check call sites
-replace_symbol_body("SymbolName", ...)         # make the change
-
-# 5. Remember (this MCP)
-remember(content="...", memory_type="...", tags="...", importance=0.8)
-```
-
-#### Do not duplicate work
-
-- Don't use `search_code` when you already know the exact symbol name — use Serena `find_symbol` directly.
-- Don't use Serena file reads for broad discovery — use `search_code` first to narrow the scope.
-- `get_file_context` is useful when Serena is unavailable or when you need indexed symbol metadata alongside the source.
-
----
 
 ### THINK — analysis
 
@@ -209,13 +153,3 @@ stats()  # how many memories exist
 - Other agents see your project-scope entries
 - Do not delete others' entries without reason
 - On conflict — create a new entry with clarification
-
----
-
-## Consolidation
-
-Periodically (or on user request):
-```
-consolidate(dry_run=True)   # preview what will be merged
-consolidate(dry_run=False)  # execute
-```

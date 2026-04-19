@@ -8,7 +8,7 @@
 [![GitHub](https://img.shields.io/badge/github-13W%2Flocal--rag-blue)](https://github.com/13W/local-rag)
 
 Semantic memory and code intelligence as an MCP plugin for Claude Code agents.
-11 tools that give Claude persistent memory, semantic code search, import graph traversal, and symbol-level navigation — all running locally.
+9 tools that give Claude persistent memory, semantic code search, import graph traversal, and symbol-level navigation — all running locally.
 
 ## What it does
 
@@ -17,13 +17,11 @@ Semantic memory and code intelligence as an MCP plugin for Claude Code agents.
 | `recall(query)` | Semantic search across stored memories |
 | `remember(content)` | Store memory with type / scope / tags / importance |
 | `search_code(query)` | Hybrid RAG over indexed codebase (4 modes, reranker, name filter) |
-| `get_symbol(symbol_id)` | Retrieve a symbol by UUID — direct Qdrant lookup, no file I/O |
 | `find_usages(symbol_id)` | Find callers/references of a symbol (lexical + semantic, self-excluded) |
-| `get_file_context(file_path)` | Read file + list indexed symbols with UUIDs for `get_symbol`/`find_usages` |
+| `get_file_context(file_path)` | Read file + list indexed symbols with UUIDs for `find_usages` |
 | `get_dependencies(file_path)` | Import graph traversal (forward / reverse / transitive) |
 | `project_overview()` | 3-level directory tree, entry points, top imports |
 | `forget(memory_id)` | Delete a memory permanently |
-| `consolidate()` | Merge semantically similar memories |
 | `stats()` | Memory and index statistics |
 
 ## Stack
@@ -145,66 +143,14 @@ claude mcp add memory -s user -- npx -y @13w/local-rag serve --config .memory.js
 claude mcp add memory -- local-rag serve --config .memory.json
 ```
 
----
 
-### Install Serena (recommended companion)
-
-Serena provides filesystem access and precise symbolic code editing that complements local-rag:
-local-rag finds code by meaning, Serena reads and edits it surgically.
-
-Repo: <https://github.com/oraios/serena>
-
-**Requirements:** Python 3.10+, [`uv`](https://docs.astral.sh/uv/)
-
-```bash
-# Install uv
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# Register Serena as a Claude Code plugin (per-project)
-claude mcp add serena -- uvx --from serena serena-mcp-server --context ide-assistant --project .
-```
-
-Or in `.mcp.json`:
-
-```json
-{
-  "mcpServers": {
-    "serena": {
-      "type": "stdio",
-      "command": "uvx",
-      "args": ["--from", "serena", "serena-mcp-server", "--context", "ide-assistant", "--project", "."]
-    }
-  }
-}
-```
-
----
-
-### Combined `.mcp.json` (both plugins)
-
-```json
-{
-  "mcpServers": {
-    "memory": {
-      "type": "stdio",
-      "command": "npx",
-      "args": ["-y", "@13w/local-rag", "serve", "--config", ".memory.json"]
-    },
-    "serena": {
-      "type": "stdio",
-      "command": "uvx",
-      "args": ["--from", "serena", "serena-mcp-server", "--context", "ide-assistant", "--project", "."]
-    }
-  }
-}
-```
 
 ---
 
 ### Agent workflow setup
 
 Run `init` once in your project root after registering the MCP plugin.
-It installs hooks that enforce the recall → search → remember protocol on every session and prompt, and writes reference guides into `.claude/rules/` so Claude always has the tool conventions at hand.
+It configures hooks and registers the MCP server. All protocol guidance is delivered via MCP server instructions on handshake — no files are written into `.claude/rules/`.
 
 ```bash
 npx @13w/local-rag init
@@ -216,28 +162,16 @@ local-rag init
 Output:
 
 ```
-wrote  .claude/hooks/session-start.sh
-wrote  .claude/hooks/prompt-reminder.sh
-wrote  .claude/settings.json
-wrote  .claude/settings.local.json
-wrote  .claude/rules/continuous-remember.md
-wrote  .claude/rules/memory-protocol-reference.md
-wrote  .claude/rules/serena-conventions.md
+configured  .claude/settings.local.json
 ```
 
 What each file does:
 
 | File | Purpose |
 |------|---------|
-| `hooks/session-start.sh` | Injects the full protocol cheatsheet as a `system-reminder` at every session start and after context compaction |
-| `hooks/prompt-reminder.sh` | Fires on every user prompt — reminds Claude to `recall()` before acting and `remember()` after |
-| `rules/continuous-remember.md` | When and how to call `remember()` immediately (trigger events, format, anti-patterns) |
-| `rules/memory-protocol-reference.md` | Full tool reference with parameter tables and call examples |
-| `rules/serena-conventions.md` | Serena vs Memory MCP routing guide and end-to-end editing workflow |
-| `settings.json` | Registers the hooks in Claude Code (commit this) |
-| `settings.local.json` | Local hook overrides — add to `.gitignore` |
+| `settings.local.json` | Registers the MCP server and hooks in Claude Code |
 
-Commit `.claude/hooks/`, `.claude/rules/`, and `.claude/settings.json` to share the workflow with your team.
+Commit `.claude/settings.json` to share the MCP server configuration with your team.
 
 ---
 
@@ -344,9 +278,6 @@ search_code("parse imports typescript")
 # From file listing
 get_file_context("src/parser.ts")
 # → function  extractImports  (lines 248–264)  id: abc-123-...
-
-# Read the symbol directly (no file I/O)
-get_symbol("abc-123-...")
 
 # Find all callers / references
 find_usages("abc-123-...", limit=20)
