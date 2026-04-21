@@ -2,13 +2,13 @@
   <img src="logo.svg" width="80" height="80" alt="local-rag logo">
 </div>
 
-# local-rag — Distributed Memory + Code RAG for Claude Code
+# local-rag — Distributed Memory + Code RAG for Claude Code & Gemini CLI
 
 [![npm](https://img.shields.io/npm/v/@13w/local-rag)](https://www.npmjs.com/package/@13w/local-rag)
 [![GitHub](https://img.shields.io/badge/github-13W%2Flocal--rag-blue)](https://github.com/13W/local-rag)
 
-Semantic memory and code intelligence as an MCP plugin for Claude Code agents.
-9 tools that give Claude persistent memory, semantic code search, import graph traversal, and symbol-level navigation — all running locally.
+Semantic memory and code intelligence as an MCP server for Claude Code and Gemini CLI agents.
+11 tools that give AI agents persistent memory, semantic code search, import graph traversal, and symbol-level navigation — all running locally.
 
 ## What it does
 
@@ -22,6 +22,8 @@ Semantic memory and code intelligence as an MCP plugin for Claude Code agents.
 | `get_dependencies(file_path)` | Import graph traversal (forward / reverse / transitive) |
 | `project_overview()` | 3-level directory tree, entry points, top imports |
 | `forget(memory_id)` | Delete a memory permanently |
+| `give_feedback(content)` | Record agent feedback / session observations |
+| `consolidate(source, target)` | Merge similar memories to reduce redundancy |
 | `stats()` | Memory and index statistics |
 
 ## Stack
@@ -29,7 +31,7 @@ Semantic memory and code intelligence as an MCP plugin for Claude Code agents.
 - **Qdrant** — vector database (Rust, production-ready)
 - **Ollama** — local embeddings (`embeddinggemma:300m`)
 - **tree-sitter** — multi-language code parser (TypeScript, JavaScript, Go, Rust)
-- **MCP** — Model Context Protocol (stdio transport)
+- **MCP** — Model Context Protocol (HTTP transport)
 
 ---
 
@@ -105,79 +107,96 @@ npm install && npm run build
 
 ---
 
-## Claude Code Plugin Setup
+## Setup
 
-### Install local-rag
+local-rag runs as a **persistent HTTP server** shared across all your projects.
+You start it once, then register each project with `init`.
 
-**Option A — `claude mcp add` with npx (no global install needed)**
-
-Per-project (stored in `.mcp.json`, shared with the team):
-
-```bash
-claude mcp add memory -- npx -y @13w/local-rag serve --config .memory.json
-```
-
-Global — available in all projects on this machine:
+### Step 1 — Start the server
 
 ```bash
-claude mcp add memory -s user -- npx -y @13w/local-rag serve --config .memory.json
+# Using npx (no global install needed)
+npx @13w/local-rag serve
+
+# Or after global install
+local-rag serve
 ```
 
-**Option B — `.mcp.json` directly**
+The server starts on port `7531` by default and opens the live dashboard in your browser.
+MCP endpoint: `http://127.0.0.1:7531/mcp?project=<id>&agent=<id>`
 
-```json
-{
-  "mcpServers": {
-    "memory": {
-      "type": "stdio",
-      "command": "npx",
-      "args": ["-y", "@13w/local-rag", "serve", "--config", ".memory.json"]
-    }
-  }
-}
-```
+> The server must be running before using any agent tools or running `init`.
 
-**Option C — After global `npm install -g`**
+### Step 2 — Register a project
 
-```bash
-claude mcp add memory -- local-rag serve --config .memory.json
-```
-
-
-
----
-
-### Agent workflow setup
-
-Run `init` once in your project root after registering the MCP plugin.
-It configures hooks and registers the MCP server. All protocol guidance is delivered via MCP server instructions on handshake — no files are written into `.claude/rules/`.
+Run once in each project root:
 
 ```bash
 npx @13w/local-rag init
 
-# If installed globally
+# Or after global install
 local-rag init
 ```
 
+Interactive prompts:
+```
+Project name [my-project]:
+Agent name [my-project]:
+```
+
+`init` automatically:
+- Registers the project on the running server
+- Writes MCP wiring and hooks to `.claude/settings.local.json` (Claude Code)
+- Writes MCP wiring and hooks to `.gemini/settings.json` if `.gemini/` exists (Gemini CLI)
+- Prints the dashboard URL for this project
+
 Output:
-
 ```
-configured  .claude/settings.local.json
+[init] Configured settings.local.json (Claude Code)
+[init] Configured .gemini/settings.json (Gemini CLI)
+[init] Project 'my-project' created.
+[init] Dashboard: http://127.0.0.1:7531/?project=my-project
 ```
 
-What each file does:
+> Do not commit `.claude/settings.local.json` — it contains machine-local paths.
+> Commit `.claude/settings.json` only if it exists and was set up separately for team sharing.
 
-| File | Purpose |
-|------|---------|
-| `settings.local.json` | Registers the MCP server and hooks in Claude Code |
+### Step 3 — Index your codebase
 
-Commit `.claude/settings.json` to share the MCP server configuration with your team.
+Open the dashboard and start the indexer there, **or** use the CLI:
+
+```bash
+local-rag index .
+```
+
+Once indexed, `search_code`, `get_file_context`, and `find_usages` are ready to use.
 
 ---
 
 ## Configuration
 
-Create `.memory.json` in your project root (auto-discovered if present):
+### Server config — `~/.config/local-rag/config.json`
+
+Global config for the `local-rag serve` daemon. Created automatically on first run.
+
+```json
+{
+  "qdrant": {
+    "url": "http://localhost:6333",
+    "api_key": "",
+    "tls": false,
+    "prefix": ""
+  },
+  "port": 7531
+}
+```
+
+Project settings (embed model, include paths, etc.) are configured per-project via the dashboard.
+
+### Indexer CLI config — `.memory.json`
+
+Optional config file for standalone CLI commands (`index`, `watch`, `clear`, etc.).
+Not used by `local-rag serve`.
 
 ```json
 {
@@ -288,27 +307,27 @@ find_usages("abc-123-...", limit=20)
 
 ## Indexing Your Codebase
 
-Before `search_code` and `get_file_context` tools return results, index the project:
+The recommended way is via the **live dashboard** — open it after `local-rag init` and start the indexer from there. It shows progress and lets you configure `include-paths` for monorepos.
+
+Alternatively, use the CLI:
 
 ```bash
 # Index once
-npx @13w/local-rag index . --config .memory.json
+local-rag index .
 
 # Watch mode — re-indexes on file changes
-npx @13w/local-rag watch . --config .memory.json
-
-# If installed globally
-local-rag index . --config .memory.json
-local-rag watch . --config .memory.json
+local-rag watch .
 ```
 
 Other indexer commands:
 
 ```bash
-local-rag clear --config .memory.json    # remove all indexed chunks
-local-rag stats --config .memory.json    # show collection statistics
-local-rag file <abs-path> <root>         # index a single file
-local-rag repair . --config .memory.json # fix empty symbol names (payload-only, no re-embedding)
+local-rag clear               # remove all indexed chunks for this project
+local-rag stats               # show collection statistics
+local-rag file <abs> <root>   # index a single file
+local-rag repair .            # fix empty symbol names (payload-only, no re-embedding)
+local-rag gc .                # clean up chunks for deleted git branches
+local-rag re-embed            # re-generate embeddings (e.g. after changing embed model)
 ```
 
 `repair` is useful after updating to a version with improved parser extraction logic: it patches only the `name` field for affected chunks without regenerating embeddings or descriptions.
@@ -317,16 +336,15 @@ local-rag repair . --config .memory.json # fix empty symbol names (payload-only,
 
 ## Live Dashboard
 
-`local-rag serve` automatically opens a browser dashboard on a local HTTP port.
+`local-rag serve` opens a browser dashboard at `http://127.0.0.1:7531`.
 It displays real-time tool call statistics (calls, bytes, latency, errors per tool),
 a scrolling request log, a server info bar (project, branch, version, watch status),
 and an interactive tool playground for testing calls manually.
 
-The port is OS-assigned by default (printed to stderr as `[dashboard] http://localhost:PORT`).
-To use a fixed port or disable the dashboard:
+The default port is `7531`. To use a different port or disable the dashboard:
 
 ```json
-{ "dashboard-port": 4242 }
+{ "port": 8080 }
 { "dashboard": false }
 ```
 
@@ -344,6 +362,13 @@ To use a fixed port or disable the dashboard:
 
 ## Agent Protocol
 
-Run `local-rag init` (see [Agent workflow setup](#agent-workflow-setup)) to install the full
-`RECALL → SEARCH_CODE → THINK → ACT → REMEMBER` protocol into your project.
-The hooks fire automatically — no manual prompting required.
+After `local-rag init`, the following hooks fire automatically on each agent session:
+
+| Hook | Trigger | Action |
+|------|---------|--------|
+| `SessionStart` | Agent starts | Injects memory snapshot into system context |
+| `UserPromptSubmit` / `BeforeAgent` | User sends prompt | Runs semantic recall against the prompt |
+| `Stop` / `AfterAgent` | Agent finishes | Stores new memories from the session |
+| `SessionEnd` | Session ends | Records session feedback |
+
+The full `RECALL → SEARCH_CODE → THINK → ACT → REMEMBER` protocol is delivered via MCP server instructions on handshake — no files are written into `.claude/rules/`.
