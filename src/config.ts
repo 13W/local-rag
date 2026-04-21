@@ -1,10 +1,10 @@
 import type { ServerConfig } from "./server-config.js";
-import { getProjectId, getAgentId } from "./request-context.js";
+import { getProjectId } from "./request-context.js";
 import { setCollectionPrefix, setEmbedDim } from "./qdrant.js";
 import { applyRateLimits } from "./llm-client.js";
 
 // Re-export for backward compat — tools can import these from config.js
-export { getProjectId, getAgentId };
+export { getProjectId };
 
 // ── RouterProviderSpec ────────────────────────────────────────────────────────
 
@@ -42,10 +42,9 @@ interface RuntimeConfig {
   collectionPrefix:     string;
   port:                 number;
   projectId:            string;
-  agentId:              string;
   debugLogPath:         string;
   generateDescriptions: boolean;
-  projectRoot:          string;
+  projectDir:           string;
   includePaths:         string[];
   dashboard:            boolean;
   dashboardPort:        number;
@@ -74,17 +73,16 @@ export const cfg: RuntimeConfig = {
   collectionPrefix:     "",
   port:                 7531,
   projectId:            "default",
-  agentId:              "default",
   debugLogPath:         process.env["MEMORY_DEBUG_LOG"] ?? "",
   generateDescriptions: true,
-  projectRoot:          "",
+  projectDir:           "",
   includePaths:         [],
   dashboard:            true,
   dashboardPort:        0,
 };
 
 /** Called at server startup after loading ServerConfig from Qdrant. */
-export function applyServerConfig(sc: ServerConfig, projectId?: string, agentId?: string): void {
+export function applyServerConfig(sc: ServerConfig, projectId?: string): void {
   cfg.embedProvider    = sc.embed.provider as RuntimeConfig["embedProvider"];
   cfg.embedModel       = sc.embed.model;
   cfg.embedApiKey      = sc.embed.api_key;
@@ -103,7 +101,6 @@ export function applyServerConfig(sc: ServerConfig, projectId?: string, agentId?
   cfg.collectionPrefix = sc.collection_prefix;
   cfg.port             = sc.port;
   if (projectId) cfg.projectId = projectId;
-  if (agentId)   cfg.agentId   = agentId;
   // Propagate to qdrant module
   setCollectionPrefix(sc.collection_prefix);
   setEmbedDim(sc.embed.dim);

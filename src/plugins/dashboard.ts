@@ -133,7 +133,7 @@ async function serverInfo(): Promise<ServerInfo> {
   const projectId = getProjectIdCtx();
   const { loadProjectConfig } = await import("../server-config.js");
   const project = await loadProjectConfig(qd, projectId);
-  const root = project?.project_dir || cfg.projectRoot;
+  const root = project?.project_dir || cfg.projectDir;
 
   return {
     projectId,

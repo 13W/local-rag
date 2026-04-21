@@ -159,7 +159,7 @@ async function getAllIndexedFilePaths(): Promise<string[]> {
 }
 
 export async function projectOverviewTool(): Promise<string> {
-  const root = resolve(cfg.projectRoot || process.cwd());
+  const root = resolve(cfg.projectDir || process.cwd());
 
   const [tree, entryPoints, langStats, allFiles, collectionInfo] = await Promise.all([
     Promise.resolve(buildDirTree(root, 0, 3)),

@@ -7,7 +7,7 @@ import { cfg } from "./config.js";
 import { qd, colName } from "./qdrant.js";
 import { embedOne } from "./embedder.js";
 import { broadcastMemoryUpdate } from "./plugins/dashboard.js";
-import { getProjectId, getAgentId } from  './request-context.js'
+import { getProjectId } from  './request-context.js'
 
 export function colForType(memoryType: string): string {
   if (memoryType === "memory") return colName("memory");
@@ -91,12 +91,10 @@ export async function storeMemory(params: StoreMemoryParams): Promise<string> {
         confidence: confidence ?? importance,
         source: source ?? "hook-remember",
         project_id: getProjectId(),
-        agent_id: getAgentId(),
         content_hash: hash,
       }
     : {
         content,
-        agent_id: getAgentId(),
         project_id: getProjectId(),
         memory_type: memoryType,
         scope,
@@ -273,8 +271,7 @@ export function debugLog(module: string, msg: string): void {
   try {
     const ts   = new Date().toISOString();
     const pid  = getProjectId();
-    const aid  = getAgentId();
-    const line = `${ts}  [${pid}/${aid}] [${module}]  ${msg}\n`;
+    const line = `${ts}  [${pid}] [${module}]  ${msg}\n`;
     appendFileSync(cfg.debugLogPath, line, "utf8");
   } catch {
     // intentionally silent

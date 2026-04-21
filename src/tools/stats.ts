@@ -1,10 +1,10 @@
-import { getProjectId, getAgentId } from "../config.js";
+import { getProjectId } from "../config.js";
 import { qd, COLLECTIONS, colName } from "../qdrant.js";
 import { topAccessed } from "../storage.js";
 
 export async function statsTool(): Promise<string> {
   const lines = [
-    `Memory Stats | Agent: ${getAgentId()} | Project: ${getProjectId()}\n`,
+    `Memory Stats | Project: ${getProjectId()}\n`,
   ];
 
   const projectFilter = {

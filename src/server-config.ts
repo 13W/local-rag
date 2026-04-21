@@ -128,6 +128,19 @@ export async function loadProjectConfig(qd: QdrantClient, projectId: string): Pr
   return mergeProjectConfig({ ...(pt.payload as Partial<ProjectConfig>), project_id: projectId });
 }
 
+export async function findProjectByDir(qd: QdrantClient, projectDir: string): Promise<ProjectConfig | null> {
+  const result = await qd.scroll(PROJECTS_COL, {
+    filter: { must: [{ key: "project_dir", match: { value: projectDir } }] },
+    limit: 1, with_payload: true, with_vector: false,
+  }).catch(() => ({ points: [] as { payload?: Record<string, unknown> }[] }));
+  const pt = result.points[0];
+  if (!pt) return null;
+  return mergeProjectConfig({
+    ...(pt.payload as Partial<ProjectConfig>),
+    project_id: String((pt.payload as Record<string, unknown>)["project_id"] ?? ""),
+  });
+}
+
 export async function upsertProjectConfig(qd: QdrantClient, proj: ProjectConfig): Promise<void> {
   // 1. Try to find existing point ID for this project_id
   const result = await qd.scroll(PROJECTS_COL, {

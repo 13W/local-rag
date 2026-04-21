@@ -7,6 +7,9 @@ import { TOOLS, TOOL_MAP, dispatchTool }  from "../tools/registry.js";
 import { requestContext }                 from "../request-context.js";
 import { record, recordAgentConnect }      from "./dashboard.js";
 import { debugLog }                       from "../util.js";
+import { basename }                       from "node:path";
+import { findProjectByDir, upsertProjectConfig, mergeProjectConfig } from "../server-config.js";
+import { qd }                             from "../qdrant.js";
 
 // Server instructions are delivered once in the MCP `initialize` handshake
 // and injected by clients (Claude Code, VSCode Copilot, Goose, Zed...) directly
@@ -94,8 +97,18 @@ function buildMcpServer(projectId: string): Server {
 }
 
 async function handleMcpRequest(req: FastifyRequest, reply: FastifyReply): Promise<void> {
-  const q         = req.query as Record<string, string>;
-  const projectId = q["project"] ?? "default";
+  const q          = req.query as Record<string, string>;
+  const projectDir = q["project_dir"] ? decodeURIComponent(q["project_dir"]) : undefined;
+  let   projectId  = q["project"] ?? "default";
+
+  if (projectDir) {
+    let project = await findProjectByDir(qd, projectDir);
+    if (!project) {
+      project = mergeProjectConfig({ project_id: basename(projectDir), project_dir: projectDir });
+      await upsertProjectConfig(qd, project);
+    }
+    projectId = project.project_id;
+  }
 
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
   const mcpServer = buildMcpServer(projectId);

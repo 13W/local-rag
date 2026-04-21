@@ -71,21 +71,21 @@ parentPort.on("message", async (msg) => {
       initQdrant(qdrant.url, qdrant.api_key);
       
       currentProjectConfig = projectConfig;
-      applyServerConfig(serverConfig, projectConfig.project_id, projectConfig.agent_id);
+      applyServerConfig(serverConfig, projectConfig.project_id);
       
       const wasPaused = isPaused;
       isPaused = projectConfig.indexer_state === "paused";
       
       if (!indexer) {
         isInitializing = true;
-        const root = resolve(projectConfig.project_root || ".");
+        const root = resolve(projectConfig.project_dir || ".");
         const branch = getCurrentBranch(root);
 
         parentPort!.postMessage({ type: "info", message: `Initializing indexer for project ${projectConfig.project_id} on branch ${branch}` });
 
         indexer = new CodeIndexer({
           projectId: projectConfig.project_id,
-          projectRoot: projectConfig.project_root,
+          projectRoot: projectConfig.project_dir,
           includePaths: projectConfig.include_paths,
           generateDescriptions: cfg.generateDescriptions,
           branch,

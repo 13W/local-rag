@@ -28,14 +28,12 @@ export async function init(): Promise<void> {
     // 3. Gather project info
     const defaultName = basename(resolve(process.cwd()));
     const projectId   = await prompt(rl, `Project name [${defaultName}]: `, defaultName);
-    const agentId     = await prompt(rl, `Agent name [${projectId}]: `, projectId);
 
     // 4. Create project on server
     const proj = mergeProjectConfig({
       project_id: projectId,
-      agent_id: agentId,
       display_name: projectId,
-      project_root: resolve(process.cwd())
+      project_dir: resolve(process.cwd()),
     });
     const res  = await fetch(`${serverUrl}/api/projects`, {
       method:  "POST",
@@ -48,8 +46,8 @@ export async function init(): Promise<void> {
     }
 
     // 5. Configure hooks
-    await configureClaudeHooks(projectId, agentId, serverUrl);
-    await configureGeminiHooks(projectId, agentId, serverUrl);
+    await configureClaudeHooks(projectId, serverUrl);
+    await configureGeminiHooks(projectId, serverUrl);
 
     // 6. Print dashboard URL
     process.stderr.write(`\n[init] Project '${projectId}' created.\n`);
@@ -60,13 +58,12 @@ export async function init(): Promise<void> {
   }
 }
 
-async function configureClaudeHooks(projectId: string, agentId: string, serverUrl: string): Promise<void> {
+async function configureClaudeHooks(projectId: string, serverUrl: string): Promise<void> {
   const { writeFileSync, existsSync, readFileSync, mkdirSync } = await import("node:fs");
   const claudeDir = resolve(process.cwd(), ".claude");
   const localSettingsPath = resolve(claudeDir, "settings.local.json");
   const mainSettingsPath  = resolve(claudeDir, "settings.json");
 
-  // Determine which file to use: settings.local.json if it exists, otherwise create it.
   const settingsPath = existsSync(localSettingsPath) ? localSettingsPath : localSettingsPath;
   mkdirSync(claudeDir, { recursive: true });
 
@@ -74,32 +71,27 @@ async function configureClaudeHooks(projectId: string, agentId: string, serverUr
   if (existsSync(settingsPath)) {
     try { settings = JSON.parse(readFileSync(settingsPath, "utf8")) as Record<string, unknown>; } catch {}
   } else if (existsSync(mainSettingsPath)) {
-    // If local doesn't exist but main does, we might want to see if we should copy or just start fresh.
-    // User requested to use local to avoid committing.
+    // start fresh in settings.local.json
   }
 
-  const mcpUrl = `${serverUrl}/mcp?project=${projectId}&agent=${agentId}`;
+  const mcpUrl = `${serverUrl}/mcp?project_dir=\${CLAUDE_PROJECT_DIR}`;
   const mcpServers = (settings["mcpServers"] ?? {}) as Record<string, unknown>;
   mcpServers["memory"] = { type: "http", url: mcpUrl };
   settings["mcpServers"] = mcpServers;
 
   const hooks = (settings["hooks"] ?? {}) as Record<string, unknown[]>;
-  // For Claude Code: UserPromptSubmit for recall, Stop for remember
-  hooks["SessionStart"]     = [{ hooks: [{ type: "command", command: `local-rag hook-session-start --project ${projectId} --agent ${agentId}` }] }];
-  hooks["UserPromptSubmit"] = [{ matcher: ".*", hooks: [{ type: "command", command: `local-rag hook-recall --project ${projectId} --agent ${agentId}` }] }];
-  hooks["Stop"]             = [{ hooks: [{ type: "command", command: `local-rag hook-remember --project ${projectId} --agent ${agentId}` }] }];
-  hooks["SessionEnd"]       = [{ hooks: [{ type: "command", command: `local-rag hook-session-end --project ${projectId} --agent ${agentId} --agent-type claude` }] }];
-  
-  // Clean up old hooks if any
+  hooks["SessionStart"]     = [{ hooks: [{ type: "command", command: `local-rag hook-session-start --project-dir ${resolve(process.cwd())}` }] }];
+  hooks["UserPromptSubmit"] = [{ matcher: ".*", hooks: [{ type: "command", command: `local-rag hook-recall --project-dir ${resolve(process.cwd())}` }] }];
+  hooks["Stop"]             = [{ hooks: [{ type: "command", command: `local-rag hook-remember --project-dir ${resolve(process.cwd())}` }] }];
+  hooks["SessionEnd"]       = [{ hooks: [{ type: "command", command: `local-rag hook-session-end --project-dir ${resolve(process.cwd())}` }] }];
   delete hooks["PreToolUse"];
-  
   settings["hooks"] = hooks;
 
   writeFileSync(settingsPath, JSON.stringify(settings, null, 2), "utf8");
   process.stderr.write(`[init] Configured ${basename(settingsPath)} (Claude Code)\n`);
 }
 
-async function configureGeminiHooks(projectId: string, agentId: string, serverUrl: string): Promise<void> {
+async function configureGeminiHooks(projectId: string, serverUrl: string): Promise<void> {
   const { writeFileSync, existsSync, readFileSync, mkdirSync } = await import("node:fs");
   const geminiDir = resolve(process.cwd(), ".gemini");
   
@@ -112,17 +104,16 @@ async function configureGeminiHooks(projectId: string, agentId: string, serverUr
     try { settings = JSON.parse(readFileSync(settingsPath, "utf8")) as Record<string, unknown>; } catch {}
   }
 
-  const mcpUrl = `${serverUrl}/mcp?project=${projectId}&agent=${agentId}`;
+  const mcpUrl = `${serverUrl}/mcp?project_dir=${resolve(process.cwd())}`;
   const mcpServers = (settings["mcpServers"] ?? {}) as Record<string, unknown>;
   mcpServers["memory"] = { type: "http", url: mcpUrl };
   settings["mcpServers"] = mcpServers;
 
   const hooks = (settings["hooks"] ?? {}) as Record<string, unknown[]>;
-  // For Gemini CLI: BeforeAgent for recall, AfterAgent for remember
-  hooks["BeforeAgent"] = [{ matcher: ".*", hooks: [{ type: "command", command: `local-rag hook-recall --project ${projectId} --agent ${agentId}` }] }];
+  hooks["BeforeAgent"] = [{ matcher: ".*", hooks: [{ type: "command", command: `local-rag hook-recall --project-dir ${resolve(process.cwd())}` }] }];
   hooks["AfterAgent"]  = [
-    { hooks: [{ type: "command", command: `local-rag hook-remember --project ${projectId} --agent ${agentId}` }] },
-    { hooks: [{ type: "command", command: `local-rag hook-session-end --project ${projectId} --agent ${agentId} --agent-type gemini` }] },
+    { hooks: [{ type: "command", command: `local-rag hook-remember --project-dir ${resolve(process.cwd())}` }] },
+    { hooks: [{ type: "command", command: `local-rag hook-session-end --project-dir ${resolve(process.cwd())}` }] },
   ];
   settings["hooks"] = hooks;
 

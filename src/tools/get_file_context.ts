@@ -14,7 +14,7 @@ export interface GetFileContextArgs {
 const MAX_LINES = 500;
 
 export async function getFileContextTool(a: GetFileContextArgs): Promise<string> {
-  const projectRoot = cfg.projectRoot || process.cwd();
+  const projectRoot = cfg.projectDir || process.cwd();
   const absPath     = resolve(join(projectRoot, a.file_path));
 
   // Read the file

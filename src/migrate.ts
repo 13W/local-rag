@@ -176,7 +176,7 @@ export async function runMigrate(): Promise<void> {
   const fromPrefix  = (args["from-prefix"]  ?? "") as string;
   const toPrefix    = (args["to-prefix"]    ?? "") as string;
   const toModel     = (args["to-model"]     ?? "embeddinggemma:300m") as string;
-  const projectRoot   = ((args["project-root"] as string | undefined) || cfg.projectRoot) ?? "";
+  const projectRoot   = ((args["project-root"] as string | undefined) || cfg.projectDir) ?? "";
   const projectId     = ((args["project-id"]   as string | undefined) || cfg.projectId)   || undefined;
   const genDescs      = Boolean(args["generate-descriptions"]);
 

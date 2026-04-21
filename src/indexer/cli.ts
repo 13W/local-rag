@@ -36,7 +36,7 @@ if (!cmd) {
 
 const indexer = new CodeIndexer({
   projectId: cfg.projectId,
-  projectRoot: cfg.projectRoot,
+  projectRoot: cfg.projectDir,
   includePaths: cfg.includePaths,
   generateDescriptions: cfg.generateDescriptions,
 });
@@ -44,7 +44,7 @@ await indexer.ensureCollection();
 
 async function expandRoots(root: string): Promise<string[]> {
   if (!cfg.includePaths.length) return [root];
-  const base = cfg.projectRoot ? resolve(cfg.projectRoot) : root;
+  const base = cfg.projectDir ? resolve(cfg.projectDir) : root;
   const results: string[] = [];
   for await (const match of glob(cfg.includePaths, { cwd: base })) {
     const abs = join(base, match);
