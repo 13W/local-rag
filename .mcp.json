@@ -1,6 +1,9 @@
 {
   "memory": {
     "type": "http",
-    "url": "http://localhost:7531/mcp?project_dir=${CLAUDE_PROJECT_DIR}"
+    "url": "http://localhost:7531/mcp",
+    "headers": {
+      "X-Project-Dir": "${CLAUDE_PROJECT_DIR}"
+    }
   }
 }

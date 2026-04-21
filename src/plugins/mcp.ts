@@ -98,7 +98,8 @@ function buildMcpServer(projectId: string): Server {
 
 async function handleMcpRequest(req: FastifyRequest, reply: FastifyReply): Promise<void> {
   const q          = req.query as Record<string, string>;
-  const projectDir = q["project_dir"] ? decodeURIComponent(q["project_dir"]) : undefined;
+  const rawDir     = (req.headers["x-project-dir"] as string | undefined) ?? q["project_dir"];
+  const projectDir = rawDir ? decodeURIComponent(rawDir) : undefined;
   let   projectId  = q["project"] ?? "default";
 
   if (projectDir) {
