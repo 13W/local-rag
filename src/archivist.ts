@@ -12,7 +12,7 @@
 import { cfg, getProjectId } from "./config.js";
 import { qd, colName } from "./qdrant.js";
 import { embedOne } from "./embedder.js";
-import { callLlmSimple, callLlmWithTools, defaultRouterSpec, type ToolDef } from "./llm-client.js";
+import { callLlmSimple, callLlmTool, defaultRouterSpec, type ToolDef } from "./llm-client.js";
 import { debugLog } from "./util.js";
 import { createHash } from "node:crypto";
 
@@ -33,37 +33,15 @@ interface ProjectProfile {
 
 // ── Tool definition ───────────────────────────────────────────────────────────
 
-const SEARCH_MEMORY_TOOL: ToolDef = {
-  name: "search_memory",
-  description:
-    "Search project memory for relevant context. " +
-    "Call this to find facts, decisions, open questions, and work-in-progress. " +
-    "Reformulate the query in English for best semantic match.",
+const EXTRACT_QUERY_TOOL: ToolDef = {
+  name: "extract_query",
+  description: "Extract a concise semantic search query from the user's message.",
   parameters: {
     type: "object",
     properties: {
       query: {
         type: "string",
-        description: "Search query in English, optimised for semantic similarity.",
-      },
-      collections: {
-        type: "array",
-        items: { type: "string" },
-        description: "Collections to search. Options: memory, episodic, semantic, procedural. Omit to search all.",
-      },
-      status: {
-        type: "string",
-        enum: ["in_progress", "resolved", "open_question", "hypothesis"],
-        description: "Filter by entry status. Omit for no filter.",
-      },
-      tags: {
-        type: "array",
-        items: { type: "string" },
-        description: "Filter by tags.",
-      },
-      limit: {
-        type: "integer",
-        description: "Maximum results to return. Default 10.",
+        description: "Short English search query (max 10 words) optimised for semantic similarity.",
       },
     },
     required: ["query"],
@@ -203,23 +181,19 @@ export async function buildProjectProfile(): Promise<void> {
 
 // ── System prompt ─────────────────────────────────────────────────────────────
 
-function _buildSystemPrompt(profile: ProjectProfile | null): string {
+function _buildQueryPrompt(profile: ProjectProfile | null, prompt: string): string {
   const profileCtx = profile ? [
-    `Key topics: ${profile.topTopics.join(", ")}.`,
+    `Project topics: ${profile.topTopics.join(", ")}.`,
     `Common tags: ${profile.topTags.slice(0, 15).join(", ")}.`,
-    `Collections: ${Object.entries(profile.collectionStats).map(([c, n]) => `${c}(${n})`).join(", ")}.`,
   ].join("\n") : "";
 
   return [
-    `You are a memory archivist for project "${profile?.projectId ?? getProjectId()}".`,
     profileCtx,
     "",
-    "ROLE:",
-    "1. CONTEXT RETRIEVAL: Focus on the CURRENT MESSAGE at the bottom. Search for information relevant to it.",
-    "2. ANSWER DETECTION: If the current message is an answer to a previous question from the assistant, search for that question or related issues to find context.",
-    "3. RESOLUTION HINTS: If the current message addresses an 'open_question' or 'hypothesis', mention it so the assistant can resolve it.",
+    `Given the following message, produce ONE concise English search query (max 10 words) to retrieve relevant project memory entries.`,
+    `Return ONLY the query string — no explanation, no punctuation around it.`,
     "",
-    "Use search_memory to find context. Be specific in your query. Return your full analysis of the findings: what you found, what each status entry means for the current task, and any unresolved questions. Do not compress findings — depth is more valuable than brevity. If nothing relevant is found, return an empty string.",
+    `Message: ${prompt}`,
   ].join("\n");
 }
 
@@ -304,7 +278,7 @@ async function _executeSearchMemory(args: Record<string, unknown>): Promise<stri
 
 /**
  * Run the archivist for a user prompt.
- * Returns a systemMessage string (may be empty if nothing relevant found).
+ * Returns a plain-text bulleted list of relevant memory entries, or "".
  * Never throws.
  */
 export async function runArchivist(prompt: string): Promise<string> {
@@ -315,19 +289,37 @@ export async function runArchivist(prompt: string): Promise<string> {
   const profile = await _loadProfile().catch(() => null);
   debugLog("archivist", `profile=${profile ? "loaded" : "missing"}`);
 
-  const systemPrompt = _buildSystemPrompt(profile);
-  const spec         = cfg.routerConfig ?? defaultRouterSpec();
+  const spec = cfg.routerConfig ?? defaultRouterSpec();
 
   try {
-    const result = await callLlmWithTools(
-      prompt,
-      systemPrompt,
-      [SEARCH_MEMORY_TOOL],
-      (_name, args) => _executeSearchMemory(args),
-      spec,
-    );
-    const resultLog = result.trim().replace(/\n/g, " ").slice(0, 150);
-    debugLog("archivist", `response len=${result.length} content="${resultLog}${result.length > 150 ? "..." : ""}"`);
+    // Step 1: ask LLM only to extract a search query — no narrative output
+    const queryPrompt = _buildQueryPrompt(profile, currentMsg);
+    let searchQuery: string;
+    try {
+      const toolArgs = await callLlmTool(queryPrompt, EXTRACT_QUERY_TOOL, spec);
+      searchQuery = String(toolArgs?.["query"] ?? "").trim();
+    } catch {
+      // Fallback: use the raw message as the query
+      searchQuery = currentMsg.slice(0, 100);
+    }
+    if (!searchQuery) return "";
+
+    debugLog("archivist", `search_query="${searchQuery}"`);
+
+    // Step 2: run the search directly — no LLM involved in formatting
+    const rawResults = await _executeSearchMemory({ query: searchQuery, limit: 8 });
+    const parsed = JSON.parse(rawResults) as { results: { text: string; score: string; status: string; tags: string[] }[] };
+    if (!parsed.results.length) return "";
+
+    // Step 3: format deterministically — no LLM, no chance of injection
+    const bullets = parsed.results.map(r => {
+      const snippet = r.text.replace(/\n/g, " ").trim();
+      const status  = r.status ? ` [${r.status}]` : "";
+      return `• ${snippet}${status}`;
+    });
+
+    const result = bullets.join("\n");
+    debugLog("archivist", `response bullets=${bullets.length} len=${result.length}`);
     return result;
   } catch (err: unknown) {
     process.stderr.write(`[archivist] failed: ${String(err)}\n`);

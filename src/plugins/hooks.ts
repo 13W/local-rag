@@ -187,10 +187,13 @@ export async function hooksPlugin(fastify: FastifyInstance): Promise<void> {
         // UserPromptSubmit: inject archivist output via hookSpecificOutput.additionalContext
         // so it actually lands in the model's context. The top-level `systemMessage` field
         // is a UI-only message (shown to the user, not the model) per Claude Code hook spec.
+        const contextWithHeader = systemMessage
+          ? `[local-rag memory context]\n${systemMessage}\n[/local-rag memory context]`
+          : "";
         const response = {
           hookSpecificOutput: {
             hookEventName:     "UserPromptSubmit" as const,
-            additionalContext: systemMessage,
+            additionalContext: contextWithHeader,
           },
         };
 
