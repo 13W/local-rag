@@ -81,7 +81,7 @@ docker run -d --name qdrant \
 
 **Option C — Qdrant Cloud**
 
-<https://cloud.qdrant.io/> — set `qdrant-url` in `.memory.json` to your cluster endpoint.
+<https://cloud.qdrant.io/> — configure the Qdrant URL per-project via the dashboard after setup.
 
 ### 3. Node.js 18+
 
@@ -91,83 +91,67 @@ docker run -d --name qdrant \
 
 ## Installation
 
-**From npm (recommended):**
+### Claude Code
+
+1. Add the marketplace source:
 
 ```bash
-npm install -g @13w/local-rag
+claude plugin marketplace add https://github.com/13w/local-rag
 ```
 
-**From source:**
+2. Install the plugin:
 
 ```bash
-git clone https://github.com/13W/local-rag.git
-cd local-rag
-npm install && npm run build
+claude plugin install local-rag
 ```
 
----
+> The plugin registers hooks and the MCP server automatically — no project-level `init` needed.
 
-## Setup
+### Gemini CLI
 
-local-rag runs as a **persistent HTTP server** shared across all your projects.
-You start it once, then register each project with `init`.
+```bash
+gemini extensions install https://github.com/13w/local-rag
+```
 
-### Step 1 — Start the server
+### Run the server (once per machine)
+
+The plugin connects to a local HTTP server that must be running:
 
 ```bash
 # Using npx (no global install needed)
 npx @13w/local-rag serve
 
 # Or after global install
+npm install -g @13w/local-rag
 local-rag serve
 ```
 
-The server starts on port `7531` by default and opens the live dashboard in your browser.
-MCP endpoint: `http://127.0.0.1:7531/mcp?project=<id>&agent=<id>`
+The server starts on port `7531` and opens a live dashboard at `http://127.0.0.1:7531`.
 
-> The server must be running before using any agent tools or running `init`.
+---
 
-### Step 2 — Register a project
+## Setup
 
-Run once in each project root:
+local-rag runs as a **persistent HTTP server** shared across all your projects.
+Start it once; the plugin auto-registers each project on first session.
+
+### Step 1 — Start the server
 
 ```bash
-npx @13w/local-rag init
-
-# Or after global install
-local-rag init
+local-rag serve
 ```
 
-Interactive prompts:
-```
-Project name [my-project]:
-Agent name [my-project]:
-```
+Leave it running. Every project that has the plugin installed connects automatically
+on the first `SessionStart` hook.
 
-`init` automatically:
-- Registers the project on the running server
-- Writes MCP wiring and hooks to `.claude/settings.local.json` (Claude Code)
-- Writes MCP wiring and hooks to `.gemini/settings.json` if `.gemini/` exists (Gemini CLI)
-- Prints the dashboard URL for this project
-
-Output:
-```
-[init] Configured settings.local.json (Claude Code)
-[init] Configured .gemini/settings.json (Gemini CLI)
-[init] Project 'my-project' created.
-[init] Dashboard: http://127.0.0.1:7531/?project=my-project
-```
-
-> Do not commit `.claude/settings.local.json` — it contains machine-local paths.
-> Commit `.claude/settings.json` only if it exists and was set up separately for team sharing.
-
-### Step 3 — Index your codebase
-
-Open the dashboard and start the indexer there, **or** use the CLI:
+### Step 2 — Index your codebase (optional but recommended)
 
 ```bash
 local-rag index .
 ```
+
+Open the dashboard at `http://127.0.0.1:7531` to monitor progress
+or configure `include-paths` for monorepos.
 
 Once indexed, `search_code`, `get_file_context`, and `find_usages` are ready to use.
 
@@ -192,63 +176,6 @@ Global config for the `local-rag serve` daemon. Created automatically on first r
 ```
 
 Project settings (embed model, include paths, etc.) are configured per-project via the dashboard.
-
-### Indexer CLI config — `.memory.json`
-
-Optional config file for standalone CLI commands (`index`, `watch`, `clear`, etc.).
-Not used by `local-rag serve`.
-
-```json
-{
-  "project-id": "my-project",
-  "project-root": ".",
-  "qdrant-url": "http://localhost:6333",
-  "embed-provider": "ollama",
-  "embed-model": "embeddinggemma:300m",
-  "ollama-url": "http://localhost:11434"
-}
-```
-
-### Full config reference
-
-| Key | Default | Description |
-|-----|---------|-------------|
-| `project-id` | `"default"` | Isolates memories and code index per project |
-| `project-root` | config file directory | Root path for code indexing |
-| `qdrant-url` | `http://localhost:6333` | Qdrant REST API URL |
-| `embed-provider` | `"ollama"` | Embedding provider: `ollama`, `openai`, `voyage` |
-| `embed-model` | provider default¹ | Embedding model name |
-| `embed-dim` | `1024` | Embedding vector dimension |
-| `embed-api-key` | `""` | API key for OpenAI / Voyage embed providers — falls back to `OPENAI_API_KEY` / `VOYAGE_API_KEY` env var |
-| `embed-url` | `""` | Custom embedding API endpoint |
-| `ollama-url` | `http://localhost:11434` | Ollama API URL |
-| `agent-id` | `"default"` | Agent identifier (for multi-agent setups) |
-| `llm-provider` | `"ollama"` | LLM provider: `ollama`, `anthropic`, `openai` |
-| `llm-model` | provider default² | LLM model for reranking / description generation |
-| `llm-api-key` | `""` | API key for Anthropic / OpenAI LLM providers — falls back to `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` env var |
-| `llm-url` | `""` | Custom LLM API endpoint |
-| `include-paths` | `[]` | Glob patterns to limit indexing scope (monorepos) |
-| `generate-descriptions` | `false` | Auto-generate LLM descriptions for code chunks (slow) |
-| `dashboard` | `true` | Enable the live dashboard HTTP server |
-| `dashboard-port` | `0` | Dashboard HTTP port; `0` lets the OS pick a random port |
-| `collection-prefix` | `""` | String prepended to all Qdrant collection names (useful on shared Qdrant instances) |
-| `no-watch` | `false` | Disable automatic file re-indexing when files change (applies during `serve`) |
-
-> ¹ `embed-model` defaults: `ollama` → `embeddinggemma:300m`, `openai` → `text-embedding-3-small`, `voyage` → `voyage-code-3`
->
-> ² `llm-model` defaults: `ollama` → `gemma3n:e2b`, `anthropic` → `claude-haiku-4-5-20251001`, `openai` → `gpt-4o-mini`
->
-> **Resolution order (highest to lowest priority):** CLI flag → `.memory.json` value → environment variable → built-in default.
->
-> API key environment variables are provider-specific:
-> | Provider | `embed-api-key` env var | `llm-api-key` env var |
-> |----------|------------------------|-----------------------|
-> | `openai` | `OPENAI_API_KEY` | `OPENAI_API_KEY` |
-> | `voyage` | `VOYAGE_API_KEY` | — |
-> | `anthropic` | — | `ANTHROPIC_API_KEY` |
->
-> All other keys can also be passed as CLI flags (e.g. `--project-id foo`).
-> CLI flags override config file values. `include-paths` is config-file only.
 
 ---
 
@@ -307,7 +234,7 @@ find_usages("abc-123-...", limit=20)
 
 ## Indexing Your Codebase
 
-The recommended way is via the **live dashboard** — open it after `local-rag init` and start the indexer from there. It shows progress and lets you configure `include-paths` for monorepos.
+The recommended way is via the **live dashboard** at `http://127.0.0.1:7531` — start the indexer from there and configure `include-paths` for monorepos.
 
 Alternatively, use the CLI:
 
@@ -362,7 +289,7 @@ The default port is `7531`. To use a different port or disable the dashboard:
 
 ## Agent Protocol
 
-After `local-rag init`, the following hooks fire automatically on each agent session:
+After plugin installation, the following hooks fire automatically on each agent session:
 
 | Hook | Trigger | Action |
 |------|---------|--------|
