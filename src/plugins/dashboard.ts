@@ -550,11 +550,12 @@ export async function dashboardPlugin(fastify: FastifyInstance): Promise<void> {
   fastify.post<{ Body: Partial<ProjectConfig> & { project_id: string } }>("/api/projects", async (req, reply) => {
     const body = req.body;
     if (!body.project_id) return reply.code(400).send({ error: "Missing project_id" });
-    const { mergeProjectConfig, upsertProjectConfig } = await import("../server-config.js");
+    const { loadProjectConfig, mergeProjectConfig, upsertProjectConfig } = await import("../server-config.js");
     const { IndexerManager } = await import("../indexer/manager.js");
     const { readLocalConfig, defaultLocalConfigPath } = await import("../local-config.js");
 
-    const updated = mergeProjectConfig(body);
+    const existing = await loadProjectConfig(qd, body.project_id);
+    const updated = mergeProjectConfig({ ...(existing ?? {}), ...body });
     await upsertProjectConfig(qd, updated);
     const localConfig = await readLocalConfig(defaultLocalConfigPath());
     await IndexerManager.syncProject(updated, localConfig);

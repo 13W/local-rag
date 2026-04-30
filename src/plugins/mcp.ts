@@ -9,6 +9,7 @@ import { record, recordAgentConnect }      from "./dashboard.js";
 import { debugLog }                       from "../util.js";
 import { basename }                       from "node:path";
 import { findProjectByDir, upsertProjectConfig, mergeProjectConfig } from "../server-config.js";
+import { resolveWorktreeMainRoot }        from "../indexer/git.js";
 import { qd }                             from "../qdrant.js";
 
 // Server instructions are delivered once in the MCP `initialize` handshake
@@ -103,9 +104,10 @@ async function handleMcpRequest(req: FastifyRequest, reply: FastifyReply): Promi
   let   projectId  = q["project"] ?? "default";
 
   if (projectDir) {
-    let project = await findProjectByDir(qd, projectDir);
+    const canonicalDir = resolveWorktreeMainRoot(projectDir) ?? projectDir;
+    let project = await findProjectByDir(qd, canonicalDir);
     if (!project) {
-      project = mergeProjectConfig({ project_id: basename(projectDir), project_dir: projectDir });
+      project = mergeProjectConfig({ project_id: basename(canonicalDir), project_dir: canonicalDir });
       await upsertProjectConfig(qd, project);
     }
     projectId = project.project_id;

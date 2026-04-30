@@ -12,6 +12,28 @@ const COLLECTION = colName("code_chunks");
 
 // ── Git metadata (file-based, no git binary) ────────────────────────────────
 
+/**
+ * If `dir` is a git worktree (`.git` is a file, not a directory), returns the
+ * main repo root. Returns `null` if `dir` is the main repo or not a git repo.
+ */
+export function resolveWorktreeMainRoot(dir: string): string | null {
+  const dotGit = join(dir, ".git");
+  const st = statSync(dotGit, { throwIfNoEntry: false });
+  if (!st || st.isDirectory()) return null;
+
+  const content = readFileSync(dotGit, "utf8").trim();
+  const m = content.match(/^gitdir:\s*(.+)$/);
+  if (!m) return null;
+
+  const worktreeGitDir = resolve(dir, m[1]!);
+  const commondirFile  = join(worktreeGitDir, "commondir");
+  if (!existsSync(commondirFile)) return null;
+
+  const commondir  = readFileSync(commondirFile, "utf8").trim();
+  const mainGitDir = resolve(worktreeGitDir, commondir);
+  return resolve(mainGitDir, "..");
+}
+
 /** Locate the .git directory, handling worktrees (where .git is a file pointing elsewhere). */
 function findGitDir(root: string): string | null {
   const dotGit = join(root, ".git");

@@ -12,6 +12,7 @@
 import { FastifyInstance } from "fastify";
 import { readFileSync, existsSync } from "node:fs";
 import { basename } from "node:path";
+import { resolveWorktreeMainRoot } from "../indexer/git.js";
 import { getProjectId } from "../config.js";
 import { qd, colName } from "../qdrant.js";
 import { runArchivist } from "../archivist.js";
@@ -163,7 +164,9 @@ export async function hooksPlugin(fastify: FastifyInstance): Promise<void> {
     const t0        = Date.now();
     const body      = req.body ?? {} as HookBody;
     const bytesIn   = JSON.stringify(body).length;
-    const projectId = req.query.project_dir ? basename(req.query.project_dir) : "default";
+    const projectId = req.query.project_dir
+      ? basename(resolveWorktreeMainRoot(req.query.project_dir) ?? req.query.project_dir)
+      : "default";
 
     const prompt          = (body.prompt ?? "").trim();
     const transcriptPath  = body.transcript_path ?? "";
@@ -222,7 +225,9 @@ export async function hooksPlugin(fastify: FastifyInstance): Promise<void> {
     const t0        = Date.now();
     const body      = req.body ?? {} as HookBody;
     const bytesIn   = JSON.stringify(body).length;
-    const projectId = req.query.project_dir ? basename(req.query.project_dir) : "default";
+    const projectId = req.query.project_dir
+      ? basename(resolveWorktreeMainRoot(req.query.project_dir) ?? req.query.project_dir)
+      : "default";
 
     const transcriptPath  = body.transcript_path ?? "";
     const sessionId       = body.session_id       ?? "unknown";
@@ -313,7 +318,9 @@ export async function hooksPlugin(fastify: FastifyInstance): Promise<void> {
     const t0        = Date.now();
     const body      = req.body ?? {} as HookBody;
     const bytesIn   = JSON.stringify(body).length;
-    const projectId = req.query.project_dir ? basename(req.query.project_dir) : "default";
+    const projectId = req.query.project_dir
+      ? basename(resolveWorktreeMainRoot(req.query.project_dir) ?? req.query.project_dir)
+      : "default";
 
     const sessionId = body.session_id ?? "unknown";
 

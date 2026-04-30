@@ -1,5 +1,6 @@
 import { readLocalConfig, defaultLocalConfigPath } from "./local-config.js";
 import { basename } from "node:path";
+import { resolveWorktreeMainRoot } from "./indexer/git.js";
 
 const SESSION_START_MESSAGE = `Memory system active (local-rag). See MCP server instructions for the full protocol.`;
 
@@ -14,13 +15,14 @@ export async function runHookSessionStart(): Promise<void> {
   }
 
   if (projectDir) {
+    const canonicalDir = resolveWorktreeMainRoot(projectDir) ?? projectDir;
     const localCfg  = await readLocalConfig(defaultLocalConfigPath()).catch(() => null);
     const port      = localCfg?.port ?? 7531;
     const serverUrl = process.env["MEMORY_SERVER_URL"] ?? `http://127.0.0.1:${port}`;
     await fetch(`${serverUrl}/api/projects`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ project_id: basename(projectDir), display_name: basename(projectDir), project_dir: projectDir }),
+      body: JSON.stringify({ project_id: basename(canonicalDir), display_name: basename(canonicalDir), project_dir: canonicalDir }),
     }).catch(() => null);
   }
 
