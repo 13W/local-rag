@@ -1,0 +1,37 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [{
+          "type": "command",
+          "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/shared/session-start.mjs\""
+        }]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "matcher": ".*",
+        "hooks": [{
+          "type": "command",
+          "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/shared/recall.mjs\""
+        }]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [{
+          "type": "command",
+          "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/shared/remember.mjs\""
+        }]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [{
+          "type": "command",
+          "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/shared/session-end.mjs\""
+        }]
+      }
+    ]
+  }
+}

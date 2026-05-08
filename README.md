@@ -109,9 +109,14 @@ claude plugin install local-rag
 
 ### Gemini CLI
 
+The Gemini extension lives in the `extensions/gemini` subdirectory of the repo. Clone the repo locally and install from that path:
+
 ```bash
-gemini extensions install https://github.com/13w/local-rag
+git clone https://github.com/13w/local-rag
+gemini extensions install ./local-rag/extensions/gemini
 ```
+
+> **Migrating from a previous install?** Uninstall first (`gemini extensions uninstall local-rag`, `claude plugin uninstall local-rag`) before reinstalling — the old layout is cached and will continue to load otherwise.
 
 ### Run the server (once per machine)
 

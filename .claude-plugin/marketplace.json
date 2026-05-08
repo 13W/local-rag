@@ -11,7 +11,7 @@
       "name": "local-rag",
       "description": "Persistent semantic memory and code intelligence. 9 tools that give Claude persistent memory, semantic code search, import graph traversal, and symbol-level navigation — all running locally.",
       "category": "development",
-      "source": "./"
+      "source": "./extensions/claude"
     }
   ]
 }

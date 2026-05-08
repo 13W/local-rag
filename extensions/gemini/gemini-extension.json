@@ -14,7 +14,7 @@
     "local-rag": {
       "command": "node",
       "args": [
-        "${extensionPath}/hooks/mcp-proxy.mjs"
+        "${extensionPath}/hooks/shared/mcp-proxy.mjs"
       ],
       "cwd": "${extensionPath}",
       "env": {

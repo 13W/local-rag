@@ -1,3 +1,66 @@
 {
-
+  "attribution": {
+    "commit": "",
+    "pr": ""
+  },
+  "env": {
+    "ENABLE_TOOL_SEARCH": "true"
+  },
+  "skillListingBudgetFraction": 0.02,
+  "skillListingMaxDescChars": 800,
+  "permissions": {
+    "ask": [
+      "Bash(git push --force*)",
+      "Bash(git push -f*)",
+      "Bash(git push origin main*)",
+      "Bash(git push origin master*)",
+      "Bash(git push origin development*)",
+      "Bash(git reset --hard*)",
+      "Bash(git clean*)",
+      "Bash(git checkout -- *)",
+      "Bash(git restore *)",
+      "Bash(git stash drop*)",
+      "Bash(git stash clear*)",
+      "Bash(git branch -D*)",
+      "Bash(git cherry-pick*)",
+      "Bash(rm -rf*)",
+      "Bash(rm -r *)",
+      "Bash(npm publish*)",
+      "Bash(pnpm publish*)",
+      "Bash(pnpm update-locks*)",
+      "Bash(terraform apply*)",
+      "Bash(./tf apply*)",
+      "Bash(kubectl delete*)",
+      "Bash(kubectl edit*)",
+      "Bash(scripts/pipeline/stage-8-deploy*)",
+      "Bash(miri*sync*)",
+      "Bash(docker system prune*)",
+      "Bash(docker volume rm*)"
+    ],
+    "allow": [
+      "Read(~/.claude/plugins/cache/legatics-techos/**)",
+      "Bash(pnpm run agent:jest:*)",
+      "Bash(pnpm run agent:jest:coverage:*)",
+      "Bash(pnpm run test:files:*)",
+      "Bash(pnpm run test:*)",
+      "Bash(pnpm run agent:tsc:*)",
+      "Bash(pnpm run format:files:*)",
+      "Bash(pnpm run format:diff:*)",
+      "Bash(pnpm run lint:files:*)",
+      "Bash(pnpm run lint:code:*)",
+      "Bash(pnpm run lint:code:fix:*)",
+      "Bash(pnpm exec eslint:*)",
+      "Bash(pnpm exec biome:*)",
+      "Bash(pnpm biome:*)",
+      "Bash(pnpm run check:types:*)",
+      "Bash(pnpm knip:fix:*)",
+      "Bash(pnpm knip:check:*)",
+      "Bash(wc:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git config user.email:*)",
+      "Bash(echo $CLAUDE_SESSION_ID:*)"
+    ]
+  }
 }
