@@ -1,6 +1,6 @@
 {
   "memory": {
     "command": "node",
-    "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/mcp-proxy.mjs"]
+    "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/shared/mcp-proxy.mjs"]
   }
 }
