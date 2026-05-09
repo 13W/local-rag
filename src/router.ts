@@ -28,7 +28,7 @@ GUIDELINES:
 4. ARCHITECTURAL DECISIONS: Record any agreed-upon patterns or directions.
 5. STAND-ALONE TEXT: Ensure the 'text' field is clear and descriptive without needing the full context.
 
-Only include items with confidence > 0.6.
+Only include items with confidence > 0.5.
 You must call the provided tool to record your findings.
 
 Transcript excerpt (includes tool calls and summarized results):
@@ -70,16 +70,47 @@ Always include enough context to be understood without the original conversation
 
 const VALID_STATUSES = new Set<string>(["in_progress", "resolved", "open_question", "hypothesis", "observation"]);
 
+// Patterns that indicate the LLM leaked its reasoning into the `text` field
+// instead of producing a stand-alone memory entry.
+const REASONING_LEAK_PATTERNS: RegExp[] = [
+  /^\s*\(\s*[Ww]ait[, ]/,
+  /^\s*\(\s*[Hh]mm[, ]/,
+  /^\s*[Ww]ait,?\s+(the user|let me|I should|I need|I'll)/,
+  /^\s*[Hh]mm,?\s+/,
+  /^\s*[Ll]et me think/,
+  /^\s*[Aa]ctually,?\s+I\s+/,
+  /^\s*The user (is|wants|asked|said|seems)/,
+  /^\s*The (assistant|agent|AI) (is|encountered|successfully)/,
+  /^\s*I (should|need to|will|am going to|think|believe|notice)/,
+];
+
+// Project works in en/ru. CJK characters in a memory entry are almost always
+// a reasoning leak from a multilingual model.
+const CJK_RE = /[぀-ヿ㐀-鿿가-힯]/g;
+
+export function looksLikeReasoning(text: string): boolean {
+  return REASONING_LEAK_PATTERNS.some((p) => p.test(text));
+}
+
+export function hasCJKLeak(text: string): boolean {
+  const matches = text.match(CJK_RE);
+  return matches !== null && matches.length > 5;
+}
+
 function extractValidOps(parsed: unknown[]): RouterOp[] {
   return parsed.flatMap((item) => {
     if (typeof item !== "object" || !item) return [];
     const o = item as Record<string, unknown>;
     const text = String(o["text"] ?? "").trim();
     if (!text) return [];
+    if (looksLikeReasoning(text) || hasCJKLeak(text)) {
+      process.stderr.write(`[router] dropped reasoning-leak: "${text.slice(0, 80)}"\n`);
+      return [];
+    }
     const status = String(o["status"] ?? "");
     if (!VALID_STATUSES.has(status)) return [];
     const confidence = Number(o["confidence"] ?? 0);
-    if (isNaN(confidence) || confidence < 0.4) return [];
+    if (isNaN(confidence) || confidence < 0.5) return [];
     return [{ text, status: status as Status, confidence }];
   });
 }

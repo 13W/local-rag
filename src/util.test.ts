@@ -17,6 +17,7 @@ vi.mock("./router.js", () => ({}));
 import {
   colForType,
   contentHash,
+  normalizeForHash,
   nowIso,
   safeParseLines,
   extractLineText,
@@ -29,10 +30,6 @@ import {
 describe("colForType", () => {
   it('maps "memory" → collection name for memory', () => {
     expect(colForType("memory")).toBe("memory");
-  });
-
-  it('maps "memory_agents" → collection name for memory_agents', () => {
-    expect(colForType("memory_agents")).toBe("memory_agents");
   });
 
   it('maps "episodic" → memory_episodic', () => {
@@ -62,6 +59,31 @@ describe("contentHash", () => {
 
   it("differs for different inputs", () => {
     expect(contentHash("a")).not.toBe(contentHash("b"));
+  });
+
+  it("collapses trivial whitespace and case differences", () => {
+    expect(contentHash("foo")).toBe(contentHash("Foo"));
+    expect(contentHash("foo")).toBe(contentHash("foo "));
+    expect(contentHash("foo bar")).toBe(contentHash("foo  bar"));
+    expect(contentHash("foo\nbar")).toBe(contentHash("foo bar"));
+  });
+});
+
+describe("normalizeForHash", () => {
+  it("lowercases ASCII", () => {
+    expect(normalizeForHash("FOO")).toBe("foo");
+  });
+
+  it("trims edges", () => {
+    expect(normalizeForHash("  foo  ")).toBe("foo");
+  });
+
+  it("collapses whitespace runs", () => {
+    expect(normalizeForHash("a  b\t\nc")).toBe("a b c");
+  });
+
+  it("applies NFKC to full-width characters", () => {
+    expect(normalizeForHash("ＡＢ")).toBe("ab");
   });
 });
 

@@ -11,12 +11,24 @@ import { getProjectId } from  './request-context.js'
 
 export function colForType(memoryType: string): string {
   if (memoryType === "memory") return colName("memory");
-  if (memoryType === "memory_agents") return colName("memory_agents");
   return colName(`memory_${memoryType}`);
 }
 
+/**
+ * Normalize content for dedup hashing: lower-case, NFKC, collapse whitespace.
+ * Trivial differences (trailing space, capitalization, full-width punctuation)
+ * collapse to the same hash.
+ */
+export function normalizeForHash(s: string): string {
+  return s
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 export function contentHash(s: string): string {
-  return createHash("sha256").update(s).digest("hex").slice(0, 16);
+  return createHash("sha256").update(normalizeForHash(s)).digest("hex").slice(0, 16);
 }
 
 export function nowIso(): string {
@@ -39,11 +51,9 @@ export async function storeMemory(params: StoreMemoryParams): Promise<string> {
   } = params;
 
   if (
-    !["episodic", "semantic", "procedural", "memory", "memory_agents"].includes(
-      memoryType,
-    )
+    !["episodic", "semantic", "procedural", "memory"].includes(memoryType)
   ) {
-    return "error: memory_type must be: episodic, semantic, procedural, memory, memory_agents";
+    return "error: memory_type must be: episodic, semantic, procedural, memory";
   }
 
   const colName = colForType(memoryType);
@@ -78,7 +88,7 @@ export async function storeMemory(params: StoreMemoryParams): Promise<string> {
 
   const embedding = await embedOne(content);
 
-  const isNewSchema = memoryType === "memory" || memoryType === "memory_agents";
+  const isNewSchema = memoryType === "memory";
   const payload: any = isNewSchema
     ? {
         text: content,
@@ -89,7 +99,7 @@ export async function storeMemory(params: StoreMemoryParams): Promise<string> {
         updated_at: now,
         resolved_at: status === "resolved" ? now : null,
         confidence: confidence ?? importance,
-        source: source ?? "hook-remember",
+        source: source ?? "unknown",
         project_id: getProjectId(),
         content_hash: hash,
       }

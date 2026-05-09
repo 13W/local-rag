@@ -95,14 +95,6 @@ describe("storeMemory", () => {
     expect(payload).not.toHaveProperty("memory_type");
   });
 
-  it("uses new schema for memory_agents type", async () => {
-    await storeMemory(params({ memoryType: "memory_agents" }));
-    const call = mockUpsert.mock.calls[0]!;
-    const payload = call[1].points[0].payload;
-    expect(payload).toHaveProperty("text");
-    expect(payload).not.toHaveProperty("content");
-  });
-
   it("sets expires_at when ttlHours > 0", async () => {
     await storeMemory(params({ memoryType: "episodic", ttlHours: 24 }));
     const payload = mockUpsert.mock.calls[0]![1].points[0].payload;

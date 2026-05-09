@@ -78,7 +78,7 @@ async function persistHookCall(
   });
 }
 
-type SessionType = "headless" | "multi-agent" | "editing" | "planning";
+type SessionType = "headless" | "editing" | "planning";
 
 interface SessionDetection {
   type: SessionType;
@@ -88,16 +88,6 @@ interface SessionDetection {
 function detectSessionType(body: HookBody, lines: JsonLine[]): SessionDetection {
   if (body.stop_hook_active) {
     return { type: "headless", threshold: 0.85 };
-  }
-
-  // Check for multi-agent
-  for (const line of lines) {
-    if (line["type"] === "SubagentStop") {
-      const agentId = String(line["agent_id"] ?? line["subagent_id"] ?? "");
-      if (agentId) {
-        return { type: "multi-agent", threshold: 0.80 };
-      }
-    }
   }
 
   // Check for editing
@@ -270,21 +260,20 @@ export async function hooksPlugin(fastify: FastifyInstance): Promise<void> {
           }
         }
 
-        const memType = sessionType === "multi-agent" ? "memory_agents" : "memory";
-
         for (const op of directOps) {
           const result = await storeMemory({
             content:    op.text,
             status:     op.status,
-            memoryType: memType,
+            memoryType: "memory",
             scope:      "project",
             tags:       "",
             importance: op.confidence,
             ttlHours:   0,
             sessionId:  sessionId,
             sessionType: sessionType,
+            source:     `auto-extract:${sessionType}`,
           });
-          debugLog("hooks/remember", `op written [${memType}] status=${op.status} conf=${op.confidence.toFixed(2)} result=${result}`);
+          debugLog("hooks/remember", `op written [memory] status=${op.status} conf=${op.confidence.toFixed(2)} result=${result}`);
         }
 
         const validationMsg = buildValidationRequests(validationOps);

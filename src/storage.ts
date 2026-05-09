@@ -16,7 +16,6 @@ const MEMORY_COLLECTIONS = [
 
 export interface InsertMetaParams {
   id:          string;
-  agentId:     string;
   projectId:   string;
   memoryType:  string;
   scope:       string;

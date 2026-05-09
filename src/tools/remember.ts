@@ -18,5 +18,6 @@ export async function rememberTool(a: RememberArgs): Promise<string> {
     tags:       a.tags,
     importance: a.importance,
     ttlHours:   a.ttl_hours,
+    source:     "mcp",
   });
 }

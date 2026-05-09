@@ -1,9 +1,8 @@
-export type MemoryType = "episodic" | "semantic" | "procedural" | "memory" | "memory_agents";
+export type MemoryType = "episodic" | "semantic" | "procedural" | "memory";
 export type ScopeType  = "agent" | "project" | "global";
 
 export interface MemoryPayload {
   content:      string;
-  agent_id:     string;
   project_id:   string;
   scope:        string;
   importance:   number;
@@ -49,9 +48,9 @@ export interface StoreMemoryParams {
 // ── New memory schema (specification.md) ──────────────────────────────────────
 
 export type Status      = "in_progress" | "resolved" | "open_question" | "hypothesis" | "observation";
-export type SessionType = "planning" | "editing" | "headless" | "multi_agent";
+export type SessionType = "planning" | "editing" | "headless";
 
-/** Canonical payload for `memory` and `memory_agents` collections. */
+/** Canonical payload for the `memory` collection. */
 export interface MemoryEntryPayload {
   text:         string;        // raw content (distinct from legacy "content" field)
   status:       Status;
@@ -61,9 +60,8 @@ export interface MemoryEntryPayload {
   updated_at:   string;        // ISO 8601
   resolved_at:  string | null; // ISO 8601 or null
   confidence:   number;        // 0.0–1.0 (router score)
-  source:       string;        // e.g. "hook-remember:stop" | "hook-remember:session_end"
+  source:       string;        // "mcp" | "auto-extract" | "consolidate" | "feedback" | "unknown"
   project_id:   string;
-  agent_id:     string;
   content_hash: string;        // SHA-256 first 16 hex chars, dedup key
 }
 

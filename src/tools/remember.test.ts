@@ -34,6 +34,7 @@ describe("rememberTool", () => {
       tags:       "auth,redis",
       importance: 0.8,
       ttlHours:   24,
+      source:     "mcp",
     });
     expect(result).toBe("stored: abc");
   });

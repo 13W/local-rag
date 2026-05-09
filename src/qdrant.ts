@@ -19,7 +19,6 @@ export const COLLECTIONS = [
   "memory_semantic",
   "memory_procedural",
   "memory",
-  "memory_agents",
   "code_chunks",
   "feedback",
 ] as const;
@@ -100,9 +99,9 @@ async function ensureCodeChunks(): Promise<void> {
   process.stderr.write(`[qdrant] Created collection: ${col} (named vectors)\n`);
 }
 
-const NEW_MEMORY_COLLECTIONS = ["memory", "memory_agents"] as const;
+const NEW_MEMORY_COLLECTIONS = ["memory"] as const;
 const NEW_MEMORY_INDEXES = [
-  "project_id", "agent_id", "status", "session_id",
+  "project_id", "status", "session_id",
   "session_type", "content_hash", "source",
 ] as const;
 
@@ -130,7 +129,7 @@ export async function ensureCollections(): Promise<void> {
       vectors: { size: _embedDim, distance: "Cosine" },
     });
 
-    for (const field of ["project_id", "agent_id", "scope", "content_hash"]) {
+    for (const field of ["project_id", "scope", "content_hash"]) {
       await qd.createPayloadIndex(col, {
         field_name: field,
         field_schema: "keyword",
@@ -149,7 +148,7 @@ export async function ensureCollections(): Promise<void> {
     await qd.createCollection(colName("feedback"), {
       vectors: { size: _embedDim, distance: "Cosine" },
     });
-    for (const field of ["project_id", "agent_id", "agent_type", "session_id"]) {
+    for (const field of ["project_id", "session_id"]) {
       await qd.createPayloadIndex(colName("feedback"), {
         field_name:   field,
         field_schema: "keyword",

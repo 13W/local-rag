@@ -24,10 +24,9 @@ export async function recallTool(a: RecallArgs): Promise<string> {
     a.memory_type === "episodic" ||
     a.memory_type === "semantic" ||
     a.memory_type === "procedural" ||
-    a.memory_type === "memory" ||
-    a.memory_type === "memory_agents"
+    a.memory_type === "memory"
       ? [a.memory_type]
-      : ["episodic", "semantic", "procedural", "memory", "memory_agents"];
+      : ["episodic", "semantic", "procedural", "memory"];
   const collections = memTypes.map(colForType);
 
   const mustFilters: Array<{ key: string; match: { value: string } }> = [
@@ -102,7 +101,8 @@ export async function recallTool(a: RecallArgs): Promise<string> {
         ? (p["tags"] as string[]).map((t) => `#${t}`).join(" ")
         : "";
 
-      results.push([score, mt, hit.id, String(p["text"] ?? p["content"] ?? ""), tagStr, createdAt.slice(0, 10)]);
+      const source = String(p["source"] ?? "");
+      results.push([score, mt, hit.id, String(p["text"] ?? p["content"] ?? ""), tagStr, createdAt.slice(0, 10), source]);
     }
   }
 
@@ -119,8 +119,9 @@ export async function recallTool(a: RecallArgs): Promise<string> {
   if (limited.length === 0) return "nothing found.";
 
   const lines = [`Found ${limited.length} memories:\n`];
-  for (const [score, mt, mid, content, tagsS, date] of limited) {
-    lines.push(`[${score.toFixed(2)}] [${mt}] ${content}`);
+  for (const [score, mt, mid, content, tagsS, date, source] of limited) {
+    const srcTag = source ? ` [${source}]` : "";
+    lines.push(`[${score.toFixed(2)}] [${mt}]${srcTag} ${content}`);
     lines.push(`  ${tagsS}  |  ${mid}  |  ${date}`);
     lines.push("");
   }

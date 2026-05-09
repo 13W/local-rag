@@ -33,9 +33,6 @@ const SYNTHESIS_PROMPT =
   "Output JSON only: { \"text\": \"Actual synthesized text here\", \"status\": \"one_of_the_statuses\" }\n" +
   "Valid statuses: observation, resolved, in_progress\n\n" +
   "Input memories to synthesize:\n";
-  "Output JSON only: { \"text\": \"...\", \"status\": \"observation|resolved|in_progress\" }\n\n" +
-  "Input memories to synthesize:\n";
-  "Input memories to synthesize:\\n";
 
 export async function consolidateTool(a: ConsolidateArgs): Promise<string> {
   const srcCol = colForType(a.source);
@@ -166,6 +163,7 @@ export async function consolidateTool(a: ConsolidateArgs): Promise<string> {
         ttlHours:   0,
         sessionId:  latestSid,
         sessionType: latestStype,
+        source:     "consolidate",
       });
 
       const ids = cluster.map((idx) => String(points[idx]!.id));

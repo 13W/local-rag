@@ -233,7 +233,6 @@ interface MemoryEntry {
 async function scrollMemoryEntries(projectId?: string): Promise<MemoryEntry[]> {
   const collections = [
     colName("memory"),
-    colName("memory_agents"),
     colName("memory_episodic"),
     colName("memory_semantic"),
     colName("memory_procedural"),
@@ -468,26 +467,19 @@ export async function dashboardPlugin(fastify: FastifyInstance): Promise<void> {
       const { embedOne } = await import("../embedder.js");
       const embedding = await embedOne(q);
 
-      const memCols = [colName("memory"), colName("memory_agents"), colName("memory_episodic"), colName("memory_semantic"), colName("memory_procedural")];
-      const memHits = await Promise.all(memCols.map(col => 
-        qd.search(col, { 
-          vector: embedding, 
+      const memCols = [colName("memory"), colName("memory_episodic"), colName("memory_semantic"), colName("memory_procedural")];
+      const memHits = await Promise.all(memCols.map(col =>
+        qd.search(col, {
+          vector: embedding,
           filter: { must: [{ key: "project_id", match: { value: projectId } }] },
           limit: 10,
           with_payload: true
         }).catch(() => [])
       )).then(results => results.flat());
 
-      const agentHits = await qd.search(colName("memory_agents"), {
-        vector: embedding,
-        filter: { must: [{ key: "project_id", match: { value: projectId } }] },
-        limit: 10,
-        with_payload: true
-      }).catch(() => []);
-
       const seen: Set<string> = new Set();
       const results: any[] = [];
-      for (const hit of [...memHits, ...agentHits]) {
+      for (const hit of memHits) {
         const p    = (hit.payload ?? {}) as Record<string, unknown>;
         const hash = String(p["content_hash"] ?? hit.id);
         if (seen.has(hash)) continue;

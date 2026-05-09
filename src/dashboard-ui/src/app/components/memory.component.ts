@@ -173,11 +173,10 @@ export class MemoryComponent implements OnInit {
 
   sessionTypeClass(t: string): string {
     switch (t) {
-      case "editing":     return "text-(--color-indigo)";
-      case "planning":    return "text-(--color-sky)";
-      case "headless":    return "text-(--color-amber)";
-      case "multi_agent": return "text-(--color-emerald)";
-      default:            return "text-(--color-muted)";
+      case "editing":  return "text-(--color-indigo)";
+      case "planning": return "text-(--color-sky)";
+      case "headless": return "text-(--color-amber)";
+      default:         return "text-(--color-muted)";
     }
   }
 

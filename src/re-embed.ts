@@ -5,7 +5,7 @@
  * Does NOT delete or re-parse source files — only updates vectors in-place.
  *
  * Collections handled:
- *   • memory_*, memory, memory_agents, feedback  — single flat vector from `content`
+ *   • memory_*, memory, feedback  — single flat vector from `content`
  *   • code_chunks  — named vectors: code_vector from `content`,
  *                                   description_vector from `description`
  *

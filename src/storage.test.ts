@@ -43,7 +43,7 @@ beforeEach(() => {
 describe("insertMeta", () => {
   it("resolves without throwing", async () => {
     await expect(insertMeta({
-      id: "x", agentId: "a", projectId: "p", memoryType: "episodic",
+      id: "x", projectId: "p", memoryType: "episodic",
       scope: "project", importance: 0.5, createdAt: "", expiresAt: null,
       tags: "", contentHash: "",
     })).resolves.toBeUndefined();

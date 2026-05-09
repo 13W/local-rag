@@ -24,7 +24,7 @@ vi.mock("../storage.js", () => ({
   incrementAccess: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock("../util.js", () => ({
-  colForType: (t: string) => (t.startsWith("memory_") ? t : t === "memory" || t === "memory_agents" ? t : `memory_${t}`),
+  colForType: (t: string) => (t.startsWith("memory_") ? t : t === "memory" ? t : `memory_${t}`),
   nowIso: vi.fn(() => "2099-01-01T00:00:00Z"),
   debugLog: vi.fn(),
 }));
@@ -138,7 +138,7 @@ describe("recallTool", () => {
 
   it("searches all collections when memory_type is empty", async () => {
     await recallTool(baseArgs);
-    expect(mockSearch.mock.calls.length).toBeGreaterThanOrEqual(5);
+    expect(mockSearch.mock.calls.length).toBeGreaterThanOrEqual(4);
   });
 
   it("searches only specified collection when memory_type is set", async () => {

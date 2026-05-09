@@ -4,10 +4,11 @@ import { resolve } from "node:path";
 import { QdrantClient } from "@qdrant/js-client-rest";
 import { cfg } from "./config.js";
 import { generateDescription } from "./embedder.js";
+import { contentHash } from "./util.js";
 
 const BATCH_SIZE = 32;
 const MEMORY_COLS     = ["memory_episodic", "memory_semantic", "memory_procedural"] as const;
-const NEW_MEMORY_COLS = ["memory", "memory_agents"] as const;
+const NEW_MEMORY_COLS = ["memory"] as const;
 const CODE_CHUNK  = "code_chunks";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -132,14 +133,14 @@ async function scrollAll(
 
 async function createMemoryCol(qd: QdrantClient, name: string, dim: number): Promise<void> {
   await qd.createCollection(name, { vectors: { size: dim, distance: "Cosine" } });
-  for (const field of ["project_id", "agent_id", "scope", "content_hash"]) {
+  for (const field of ["project_id", "scope", "content_hash"]) {
     await qd.createPayloadIndex(name, { field_name: field, field_schema: "keyword", wait: true });
   }
 }
 
 async function createNewMemoryCol(qd: QdrantClient, name: string, dim: number): Promise<void> {
   await qd.createCollection(name, { vectors: { size: dim, distance: "Cosine" } });
-  for (const field of ["project_id", "agent_id", "status", "session_id", "session_type", "content_hash", "source"]) {
+  for (const field of ["project_id", "status", "session_id", "session_type", "content_hash", "source"]) {
     await qd.createPayloadIndex(name, { field_name: field, field_schema: "keyword", wait: true });
   }
 }
@@ -153,6 +154,47 @@ async function createCodeChunkCol(qd: QdrantClient, name: string, dim: number): 
   });
   for (const field of ["file_path", "chunk_type", "language", "project_id", "parent_id", "imports"]) {
     await qd.createPayloadIndex(name, { field_name: field, field_schema: "keyword", wait: true });
+  }
+}
+
+/**
+ * Rehash content_hash for every memory record using the new normalized hashing.
+ * Idempotent: skips records whose hash already matches.
+ */
+async function rehashContent(
+  qd:        QdrantClient,
+  prefix:    string,
+  projectId: string | undefined,
+): Promise<void> {
+  const targets = [
+    ...MEMORY_COLS.map((b) => ({ base: b, contentField: "content" })),
+    ...NEW_MEMORY_COLS.map((b) => ({ base: b, contentField: "text"    })),
+  ];
+
+  for (const { base, contentField } of targets) {
+    const col = colName(prefix, base);
+    const points = await scrollAll(qd, col, projectId).catch(() => [] as QdrantPoint[]);
+    if (points.length === 0) {
+      process.stderr.write(`[migrate] rehash ${col}: no points\\n`);
+      continue;
+    }
+
+    let updated = 0;
+    for (const batch of chunkArr(points, BATCH_SIZE)) {
+      const updates = batch.flatMap((pt) => {
+        const payload = (pt.payload ?? {}) as Record<string, unknown>;
+        const text    = String(payload[contentField] ?? "");
+        if (!text) return [];
+        const newHash = contentHash(text);
+        if (newHash === payload["content_hash"]) return [];
+        return [{ id: pt.id, payload: { content_hash: newHash } }];
+      });
+      for (const u of updates) {
+        await qd.setPayload(col, { points: [u.id], payload: u.payload, wait: false });
+      }
+      updated += updates.length;
+    }
+    process.stderr.write(`[migrate] rehash ${col}: ${updated}/${points.length} updated\\n`);
   }
 }
 
@@ -229,7 +271,7 @@ export async function runMigrate(): Promise<void> {
     process.stderr.write(`[migrate] ${base}: done\\n`);
   }
 
-  // ── New memory collections (memory / memory_agents) ──────────────────────
+  // ── New memory collection (memory) ────────────────────────────────────────
   for (const base of NEW_MEMORY_COLS) {
     const srcName = colName(fromPrefix, base);
     const dstName = colName(toPrefix,   base);
@@ -326,6 +368,10 @@ export async function runMigrate(): Promise<void> {
     codeProgress.finish();
     process.stderr.write(`[migrate] code_chunks: done\\n`);
   }
+
+  // ── Rehash content with normalized contentHash ───────────────────────────
+  process.stderr.write(`[migrate] Rehashing content_hash with normalized hashing…\\n`);
+  await rehashContent(qd, toPrefix, projectId);
 
   process.stderr.write("[migrate] Done.\\n");
 }

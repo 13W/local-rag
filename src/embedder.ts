@@ -197,7 +197,7 @@ export function generateDescription(chunk: {
     .then((text) => text.trim().slice(0, 3000));
 }
 
-export type Candidate = [number, string, string | number, string, string, string];
+export type Candidate = [number, string, string | number, string, string, string, string];
 
 export function llmFilter(
   query: string,
