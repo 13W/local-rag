@@ -188,6 +188,44 @@ export function getGitHeadPath(root: string): string | null {
   return gitDir ? join(gitDir, "HEAD") : null;
 }
 
+/** Path to .git/worktrees directory (for watcher). Returns null if not a git repo. */
+export function getGitWorktreesDir(root: string): string | null {
+  const gitDir = findGitDir(root);
+  if (!gitDir) return null;
+  const wtDir = join(gitDir, "worktrees");
+  return existsSync(wtDir) ? wtDir : null;
+}
+
+/**
+ * List absolute root paths of all registered git worktrees as seen from `root`.
+ * Reads `.git/worktrees/<name>/gitdir`; each file contains the path to the
+ * worktree's `.git` file, so the worktree root is the parent directory.
+ *
+ * Returns [] if not a git repo or no worktrees registered.
+ */
+export function listWorktreePaths(root: string): string[] {
+  const gitDir = findGitDir(root);
+  if (!gitDir) return [];
+  const wtDir = join(gitDir, "worktrees");
+  if (!existsSync(wtDir)) return [];
+  const paths: string[] = [];
+  let entries: import("node:fs").Dirent[];
+  try {
+    entries = readdirSync(wtDir, { withFileTypes: true });
+  } catch { return []; }
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const gitdirFile = join(wtDir, entry.name, "gitdir");
+    if (!existsSync(gitdirFile)) continue;
+    try {
+      const content = readFileSync(gitdirFile, "utf8").trim();
+      if (!content) continue;
+      paths.push(resolve(content, ".."));
+    } catch { /* skip unreadable */ }
+  }
+  return paths;
+}
+
 // ── GitState persistence (Qdrant point with chunk_type: "git_state") ─────────
 
 /** Deterministic UUID for the git_state point, derived from projectId. */

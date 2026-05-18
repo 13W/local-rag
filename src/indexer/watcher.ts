@@ -5,7 +5,14 @@ import type { CodeIndexer } from "./indexer.js";
 import { GitignoreFilter } from "./gitignore.js";
 import { cfg } from "../config.js";
 import { recordIndex, broadcastBranchSwitch } from "../plugins/dashboard.js";
-import { getCurrentBranch, getGitHeadPath, isNamedBranch, saveGitState } from "./git.js";
+import {
+  getCurrentBranch,
+  getGitHeadPath,
+  getGitWorktreesDir,
+  isNamedBranch,
+  listWorktreePaths,
+  saveGitState,
+} from "./git.js";
 import { setCurrentBranch } from "../config.js";
 
 // Directories that must never receive inotify watches (mirrors IGNORE_DIRS in indexer.ts)
@@ -15,8 +22,10 @@ const WATCH_IGNORED = [
   /[/\\](dist|build|\.next|coverage|vendor|charts|testdata)([/\\]|$)/,
 ];
 
-function buildGitignoreFilter(root: string): GitignoreFilter {
+function buildGitignoreFilter(root: string, worktreeRoots: readonly string[]): GitignoreFilter {
   const filter = new GitignoreFilter();
+  const isWorktree = (abs: string) =>
+    worktreeRoots.some((wt) => abs === wt || abs.startsWith(wt + "/"));
   const walk = (dir: string) => {
     filter.addDir(dir);
     try {
@@ -25,6 +34,7 @@ function buildGitignoreFilter(root: string): GitignoreFilter {
         const abs = join(dir, entry.name);
         if (entry.name.startsWith(".")) continue;
         if (WATCH_IGNORED.some((r) => r.test(abs))) continue;
+        if (isWorktree(abs)) continue;
         if (filter.isIgnored(abs)) continue;
         walk(abs);
       }
@@ -49,7 +59,21 @@ export function startWatcher(
   options?: WatcherOptions
 ): void {
   const absRoot = resolve(root);
-  const gitFilter = buildGitignoreFilter(absRoot);
+
+  let worktreePaths: string[] = listWorktreePaths(absRoot).map((p) => resolve(p));
+  const isInWorktree = (absPath: string): boolean => {
+    for (const wt of worktreePaths) {
+      if (absPath === wt || absPath.startsWith(wt + "/")) return true;
+    }
+    return false;
+  };
+  if (worktreePaths.length > 0) {
+    process.stderr.write(
+      `[watcher] Ignoring ${worktreePaths.length} git worktree(s): ${worktreePaths.join(", ")}\n`,
+    );
+  }
+
+  const gitFilter = buildGitignoreFilter(absRoot, worktreePaths);
 
   const watchPaths = [absRoot];
   if (indexer.includePaths.length > 0) {
@@ -61,7 +85,9 @@ export function startWatcher(
 
   const watcher = chokidar.watch(Array.from(new Set(watchPaths)), {
     ignored: (absPath: string) =>
-      WATCH_IGNORED.some((r) => r.test(absPath)) || gitFilter.isIgnored(absPath),
+      WATCH_IGNORED.some((r) => r.test(absPath))
+      || isInWorktree(absPath)
+      || gitFilter.isIgnored(absPath),
     ignoreInitial: options?.ignoreInitial ?? false,
     persistent: false,
     usePolling: false,
@@ -180,5 +206,36 @@ export function startWatcher(
       });
 
     process.stderr.write(`[watcher] Watching .git/HEAD for branch switches\n`);
+  }
+
+  // ── Worktree registration tracking via .git/worktrees/ ─────────────────────
+  // `git worktree add` creates a directory under .git/worktrees/ (with a
+  // `gitdir` file inside). Reload the ignore list so freshly-added worktrees
+  // stop receiving index events without requiring a watcher restart.
+  const worktreesDir = getGitWorktreesDir(root);
+  if (worktreesDir) {
+    let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+    const refresh = () => {
+      if (refreshTimer) clearTimeout(refreshTimer);
+      refreshTimer = setTimeout(() => {
+        worktreePaths = listWorktreePaths(absRoot).map((p) => resolve(p));
+        process.stderr.write(
+          `[watcher] Worktree list refreshed: ${worktreePaths.length} worktree(s)\n`,
+        );
+      }, 200);
+    };
+    chokidar
+      .watch(worktreesDir, {
+        persistent: false,
+        usePolling: false,
+        depth: 2,
+        ignoreInitial: true,
+      })
+      .on("addDir", refresh)
+      .on("unlinkDir", refresh)
+      .on("add", (p) => { if (p.endsWith("/gitdir")) refresh(); })
+      .on("unlink", (p) => { if (p.endsWith("/gitdir")) refresh(); });
+
+    process.stderr.write(`[watcher] Watching ${worktreesDir} for worktree changes\n`);
   }
 }

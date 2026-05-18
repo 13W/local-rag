@@ -12,18 +12,6 @@ allowBuilds:
   tree-sitter-javascript: true
   tree-sitter-rust: true
   tree-sitter-typescript: true
-
-ignoredBuiltDependencies:
-  - '@parcel/watcher'
-  - lmdb
-  - msgpackr-extract
-  - protobufjs
-  - sharp
-
-onlyBuiltDependencies:
-  - esbuild
-  - onnxruntime-node
-  - tree-sitter-go
-  - tree-sitter-javascript
-  - tree-sitter-rust
-  - tree-sitter-typescript
+  onnxruntime-node: true
+  protobufjs: false
+  sharp: false

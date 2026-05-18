@@ -56,18 +56,89 @@ function _acquireSerial(model: string): [Promise<void>, () => void] {
   return [prev as Promise<void>, release];
 }
 
-/** Internal fetch wrapper to add context to errors (especially timeouts). */
+/** Structured HTTP error from a provider call. Carries status + parsed Retry-After. */
+class LlmHttpError extends Error {
+  readonly status: number;
+  readonly body: string;
+  readonly retryAfterMs?: number;
+  constructor(label: string, status: number, body: string, retryAfterMs?: number) {
+    super(`${label}: ${status} — ${body}`);
+    this.name = "LlmHttpError";
+    this.status = status;
+    this.body = body;
+    if (retryAfterMs !== undefined) this.retryAfterMs = retryAfterMs;
+  }
+}
+
+/** Network-level failure (DNS, TCP, TLS, abort) — undici throws plain TypeError("fetch failed"). */
+class LlmNetworkError extends Error {
+  readonly url:   string;
+  readonly model: string;
+  readonly cause: unknown;
+  constructor(message: string, url: string, model: string, cause: unknown) {
+    super(message);
+    this.name  = "LlmNetworkError";
+    this.url   = url;
+    this.model = model;
+    this.cause = cause;
+  }
+}
+
+/** Internal fetch wrapper. Adds URL/model context to timeout AND network failures. */
 async function _fetchWithLogging(url: string, options: RequestInit, model: string): Promise<Response> {
+  const cleanUrl = (() => {
+    try { const u = new URL(url); return `${u.protocol}//${u.host}${u.pathname}`; } catch { return url; }
+  })();
   try {
     return await fetch(url, options);
   } catch (err: unknown) {
-    if (err instanceof Error && (err.name === "TimeoutError" || err.message.includes("timeout") || err.message.includes("aborted"))) {
-      const urlObj = new URL(url);
-      const cleanUrl = `${urlObj.protocol}//${urlObj.host}${urlObj.pathname}`;
-      throw new Error(`TimeoutError: The operation was aborted due to timeout (model=${model}, url=${cleanUrl})`);
+    const msg = err instanceof Error ? err.message : String(err);
+    const isTimeout =
+      err instanceof Error &&
+      (err.name === "TimeoutError" || msg.includes("timeout") || msg.includes("aborted"));
+    if (isTimeout) {
+      throw new LlmNetworkError(
+        `TimeoutError: aborted (model=${model}, url=${cleanUrl})`,
+        cleanUrl, model, err,
+      );
     }
-    throw err;
+    // Anything else thrown by fetch (TypeError: fetch failed, ECONN*, TLS) is
+    // surfaced as a structured network error so _withRetry can retry it.
+    throw new LlmNetworkError(
+      `NetworkError: ${msg} (model=${model}, url=${cleanUrl})`,
+      cleanUrl, model, err,
+    );
   }
+}
+
+const RETRYABLE_STATUS = new Set([408, 429, 500, 502, 503, 504]);
+
+const MAX_RETRY_AFTER_MS = 30_000;
+
+/** Parse Retry-After header or "retry in Xs" body fragment into a millisecond wait. */
+function _parseRetryAfter(headers: Headers, body: string): number | undefined {
+  const h = headers.get("retry-after");
+  if (h) {
+    const n = Number(h);
+    if (Number.isFinite(n) && n >= 0) return Math.round(n * 1000);
+    const t = Date.parse(h);
+    if (!Number.isNaN(t)) {
+      const delta = t - Date.now();
+      if (delta > 0) return delta;
+    }
+  }
+  // Provider-supplied "retry in Xs" hint inside the JSON error body (Gemini).
+  const m = body.match(/retry[^\d]*?(\d+(?:\.\d+)?)\s*s/i);
+  if (m) return Math.ceil(parseFloat(m[1]!) * 1000) + 500;
+  return undefined;
+}
+
+/** Read a non-OK Response and throw a structured LlmHttpError. */
+async function _throwIfNotOk(resp: Response, label: string, _model: string): Promise<void> {
+  if (resp.ok) return;
+  const body = await resp.text().catch(() => "");
+  const retryAfterMs = _parseRetryAfter(resp.headers, body);
+  throw new LlmHttpError(label, resp.status, body, retryAfterMs);
 }
 
 async function _withRetry<T>(fn: () => Promise<T>, model: string, attempts = 3): Promise<T> {
@@ -75,21 +146,28 @@ async function _withRetry<T>(fn: () => Promise<T>, model: string, attempts = 3):
   const [wait, release] = _acquireSerial(model);
   await wait; // block until the previous request for this model finishes
   try {
+    let lastErr: unknown;
     for (let i = 0; i < attempts; i++) {
       await queue.acquire();
       try {
         return await fn();
       } catch (err: unknown) {
-        const msg = String(err);
-        if (msg.includes("429") || msg.toLowerCase().includes("too many requests")) {
-          process.stderr.write(`[llm-client] hit rate limit (429) for model=${model}, pausing 60s (attempt ${i + 1}/${attempts})\n`);
-          queue.pause(60_000);
-          if (i < attempts - 1) continue;
-        }
-        throw err;
+        lastErr = err;
+        const httpStatus = err instanceof LlmHttpError    ? err.status : undefined;
+        const isNetwork  = err instanceof LlmNetworkError;
+        const retryable  = isNetwork || (httpStatus !== undefined && RETRYABLE_STATUS.has(httpStatus));
+        if (!retryable) throw err;
+        const hinted    = err instanceof LlmHttpError ? err.retryAfterMs : undefined;
+        const backoffMs = Math.min(hinted ?? Math.min(2 ** i, 60) * 1000, MAX_RETRY_AFTER_MS);
+        const reason    = isNetwork ? "network" : `${httpStatus}`;
+        process.stderr.write(
+          `[llm-client] retryable ${reason} for model=${model}, pausing ${(backoffMs / 1000).toFixed(1)}s (attempt ${i + 1}/${attempts})\n`,
+        );
+        queue.pause(backoffMs);
+        if (i >= attempts - 1) throw err;
       }
     }
-    throw new Error("Max retries exceeded");
+    throw lastErr ?? new Error("Max retries exceeded");
   } finally {
     release(); // unblock the next request for this model
   }
@@ -168,7 +246,7 @@ async function _callOllamaSimple(prompt: string, model: string, baseUrl: string,
     body:    JSON.stringify({ model, prompt, stream: false }),
     signal:  AbortSignal.timeout(timeout),
   }, model);
-  if (!resp.ok) { const b = await resp.text().catch(() => ""); throw new Error(`Ollama simple: ${resp.status} — ${b}`); }
+  await _throwIfNotOk(resp, "Ollama simple", model);
   const data = await resp.json() as { response: string };
   return data.response;
 }
@@ -180,7 +258,7 @@ async function _callOpenAISimple(prompt: string, model: string, apiKey: string, 
     body:    JSON.stringify({ model, messages: [{ role: "user", content: prompt }], max_tokens: maxTokens ?? MAX_TOKENS }),
     signal:  AbortSignal.timeout(timeout),
   }, model);
-  if (!resp.ok) { const b = await resp.text().catch(() => ""); throw new Error(`OpenAI simple: ${resp.status} — ${b}`); }
+  await _throwIfNotOk(resp, "OpenAI simple", model);
   const data = await resp.json() as { choices: { message: { content: string } }[] };
   return data.choices[0]?.message.content ?? "";
 }
@@ -192,7 +270,7 @@ async function _callAnthropicSimple(prompt: string, model: string, apiKey: strin
     body:    JSON.stringify({ model, max_tokens: maxTokens ?? MAX_TOKENS, messages: [{ role: "user", content: prompt }] }),
     signal:  AbortSignal.timeout(timeout),
   }, model);
-  if (!resp.ok) { const b = await resp.text().catch(() => ""); throw new Error(`Anthropic simple: ${resp.status} — ${b}`); }
+  await _throwIfNotOk(resp, "Anthropic simple", model);
   const data = await resp.json() as { content: { type: string; text: string }[] };
   return data.content[0]?.text ?? "";
 }
@@ -205,7 +283,7 @@ async function _callGeminiSimple(prompt: string, model: string, apiKey: string, 
     body:    JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { maxOutputTokens: maxTokens ?? MAX_TOKENS } }),
     signal:  AbortSignal.timeout(timeout),
   }, model);
-  if (!resp.ok) { const b = await resp.text().catch(() => ""); throw new Error(`Gemini simple: ${resp.status} — ${b}`); }
+  await _throwIfNotOk(resp, "Gemini simple", model);
   const data = await resp.json() as { candidates: { content: { parts: { text: string }[] } }[] };
   return data.candidates[0]?.content.parts[0]?.text ?? "";
 }
@@ -256,7 +334,7 @@ async function _callOllamaWithTools(
     body: JSON.stringify({ model, messages: msgs1, tools: toolDefs, stream: false }),
     signal: AbortSignal.timeout(timeout),
   }, model);
-  if (!resp1.ok) { const b = await resp1.text().catch(() => ""); throw new Error(`Ollama tools: ${resp1.status} — ${b}`); }
+  await _throwIfNotOk(resp1, "Ollama tools", model);
   const data1 = await resp1.json() as { message: { content: string; tool_calls?: { function: { name: string; arguments: Record<string, unknown> } }[] } };
   const msg1 = data1.message;
 
@@ -276,7 +354,7 @@ async function _callOllamaWithTools(
     body: JSON.stringify({ model, messages: msgs2, stream: false }),
     signal: AbortSignal.timeout(timeout),
   }, model);
-  if (!resp2.ok) { const b = await resp2.text().catch(() => ""); throw new Error(`Ollama tool result: ${resp2.status} — ${b}`); }
+  await _throwIfNotOk(resp2, "Ollama tool result", model);
   const data2 = await resp2.json() as { message: { content: string } };
   return data2.message.content;
 }
@@ -302,7 +380,7 @@ async function _callOpenAIWithTools(
     body: JSON.stringify({ model, messages: msgs1, tools: toolDefs, max_tokens: MAX_TOKENS }),
     signal: AbortSignal.timeout(timeout),
   }, model);
-  if (!resp1.ok) { const b = await resp1.text().catch(() => ""); throw new Error(`OpenAI tools: ${resp1.status} — ${b}`); }
+  await _throwIfNotOk(resp1, "OpenAI tools", model);
   const data1 = await resp1.json() as { choices: { message: { content: string | null; tool_calls?: { id: string; function: { name: string; arguments: string } }[] } }[] };
   const msg1 = data1.choices[0]?.message;
   if (!msg1) return "";
@@ -329,7 +407,7 @@ async function _callOpenAIWithTools(
     body: JSON.stringify({ model, messages: msgs2, max_tokens: MAX_TOKENS }),
     signal: AbortSignal.timeout(timeout),
   }, model);
-  if (!resp2.ok) { const b = await resp2.text().catch(() => ""); throw new Error(`OpenAI tool result: ${resp2.status} — ${b}`); }
+  await _throwIfNotOk(resp2, "OpenAI tool result", model);
   const data2 = await resp2.json() as { choices: { message: { content: string } }[] };
   return data2.choices[0]?.message.content ?? "";
 }
@@ -354,7 +432,7 @@ async function _callAnthropicWithTools(
     body: JSON.stringify({ model, max_tokens: MAX_TOKENS, system: systemPrompt, tools: toolDefs, messages: [{ role: "user", content: userMessage }] }),
     signal: AbortSignal.timeout(timeout),
   }, model);
-  if (!resp1.ok) { const b = await resp1.text().catch(() => ""); throw new Error(`Anthropic tools: ${resp1.status} — ${b}`); }
+  await _throwIfNotOk(resp1, "Anthropic tools", model);
   const data1 = await resp1.json() as { content: { type: string; text?: string; id?: string; name?: string; input?: Record<string, unknown> }[]; stop_reason: string };
 
   const toolUse = data1.content.find(c => c.type === "tool_use");
@@ -381,7 +459,7 @@ async function _callAnthropicWithTools(
     }),
     signal: AbortSignal.timeout(timeout),
   }, model);
-  if (!resp2.ok) { const b = await resp2.text().catch(() => ""); throw new Error(`Anthropic tool result: ${resp2.status} — ${b}`); }
+  await _throwIfNotOk(resp2, "Anthropic tool result", model);
   const data2 = await resp2.json() as { content: { type: string; text?: string }[] };
   return data2.content.find(c => c.type === "text")?.text ?? "";
 }
@@ -410,7 +488,7 @@ async function _callGeminiWithTools(
     body: JSON.stringify({ contents: contents1, ...toolDefs, ...genCfg }),
     signal: AbortSignal.timeout(timeout),
   }, model);
-  if (!resp1.ok) { const b = await resp1.text().catch(() => ""); throw new Error(`Gemini tools: ${resp1.status} — ${b}`); }
+  await _throwIfNotOk(resp1, "Gemini tools", model);
   const data1 = await resp1.json() as {
     candidates: { content: { role: string; parts: Array<{ text?: string; functionCall?: { name: string; args: Record<string, unknown> } }> } }[];
   };
@@ -438,7 +516,7 @@ async function _callGeminiWithTools(
     body: JSON.stringify({ contents: contents2, ...toolDefs, ...genCfg }),
     signal: AbortSignal.timeout(timeout),
   }, model);
-  if (!resp2.ok) { const b = await resp2.text().catch(() => ""); throw new Error(`Gemini tool result: ${resp2.status} — ${b}`); }
+  await _throwIfNotOk(resp2, "Gemini tool result", model);
   const data2 = await resp2.json() as { candidates: { content: { parts: { text?: string }[] } }[] };
   return data2.candidates[0]?.content.parts.find(p => p.text)?.text ?? "";
 }
@@ -477,7 +555,7 @@ async function _callOllamaTool(prompt: string, tool: ToolDef, model: string, bas
     body: JSON.stringify({ model, messages: msgs, tools: toolDefs, stream: false }),
     signal: AbortSignal.timeout(timeout),
   }, model);
-  if (!resp.ok) { const b = await resp.text().catch(() => ""); throw new Error(`Ollama tool structured: ${resp.status} — ${b}`); }
+  await _throwIfNotOk(resp, "Ollama tool structured", model);
   const data = await resp.json() as { message: { tool_calls?: { function: { name: string; arguments: Record<string, unknown> } }[] } };
   const tc = data.message.tool_calls?.[0];
   if (tc?.function.name === tool.name) return tc.function.arguments;
@@ -493,7 +571,7 @@ async function _callOpenAITool(prompt: string, tool: ToolDef, model: string, api
     body: JSON.stringify({ model, messages: msgs, tools: toolDefs, tool_choice: { type: "function", function: { name: tool.name } }, max_tokens: MAX_TOKENS }),
     signal: AbortSignal.timeout(timeout),
   }, model);
-  if (!resp.ok) { const b = await resp.text().catch(() => ""); throw new Error(`OpenAI tool structured: ${resp.status} — ${b}`); }
+  await _throwIfNotOk(resp, "OpenAI tool structured", model);
   const data = await resp.json() as { choices: { message: { tool_calls?: { function: { name: string; arguments: string } }[] } }[] };
   const tc = data.choices[0]?.message.tool_calls?.[0];
   if (tc?.function.name === tool.name) {
@@ -510,7 +588,7 @@ async function _callAnthropicTool(prompt: string, tool: ToolDef, model: string, 
     body: JSON.stringify({ model, max_tokens: MAX_TOKENS, tools: toolDefs, tool_choice: { type: "tool", name: tool.name }, messages: [{ role: "user", content: prompt }] }),
     signal: AbortSignal.timeout(timeout),
   }, model);
-  if (!resp.ok) { const b = await resp.text().catch(() => ""); throw new Error(`Anthropic tool structured: ${resp.status} — ${b}`); }
+  await _throwIfNotOk(resp, "Anthropic tool structured", model);
   const data = await resp.json() as { content: { type: string; name?: string; input?: Record<string, unknown> }[] };
   const toolUse = data.content.find(c => c.type === "tool_use" && c.name === tool.name);
   return toolUse?.input ?? null;
@@ -527,7 +605,7 @@ async function _callGeminiTool(prompt: string, tool: ToolDef, model: string, api
     body: JSON.stringify({ contents, ...toolDefs, ...toolConfig, ...genCfg }),
     signal: AbortSignal.timeout(timeout),
   }, model);
-  if (!resp.ok) { const b = await resp.text().catch(() => ""); throw new Error(`Gemini tool structured: ${resp.status} — ${b}`); }
+  await _throwIfNotOk(resp, "Gemini tool structured", model);
   const data = await resp.json() as { candidates: { content: { parts: Array<{ functionCall?: { name: string; args: Record<string, unknown> } }> } }[] };
   const fcPart = data.candidates[0]?.content.parts?.find(p => p.functionCall);
   if (fcPart?.functionCall?.name === tool.name) return fcPart.functionCall.args;

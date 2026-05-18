@@ -9,6 +9,8 @@ import { Queue } from "./queue.js";
 
 let _embedQueue = new Queue(90, 60);
 
+const MAX_RETRY_AFTER_MS = 30_000;
+
 export function applyEmbedRateLimit(size: number, window: number): void {
   _embedQueue = new Queue(size, window);
 }
@@ -115,7 +117,10 @@ async function embedGemini(texts: string[], baseUrl: string, timeout: number): P
         const body = await resp.text().catch(() => "");
         // Parse provider-supplied retry delay ("retry in Xs") when present.
         const m      = body.match(/retry[^\d]*?(\d+(?:\.\d+)?)\s*s/i);
-        const waitMs = m ? Math.ceil(parseFloat(m[1]!) * 1000) + 500 : 60_000;
+        const waitMs = Math.min(
+          m ? Math.ceil(parseFloat(m[1]!) * 1000) + 500 : 60_000,
+          MAX_RETRY_AFTER_MS,
+        );
         process.stderr.write(
           `[embedder] rate limit (${resp.status}), pausing ${(waitMs / 1000).toFixed(1)}s (attempt ${attempt + 1})\n`
         );

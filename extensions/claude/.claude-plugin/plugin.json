@@ -1,6 +1,7 @@
 {
   "name": "local-rag",
   "description": "Persistent semantic memory and code intelligence. 9 tools that give Claude persistent memory, semantic code search, import graph traversal, and symbol-level navigation — all running locally.",
+  "version": "2.0.0",
   "author": {
     "name": "Vladimir Bulyga",
     "email": "zero@13w.me"

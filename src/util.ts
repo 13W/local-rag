@@ -289,6 +289,15 @@ export function debugLog(module: string, msg: string): void {
 }
 
 /**
+ * Write a log line to stderr prefixed with an ISO timestamp. Use this for
+ * normal `[module] message` log output; do not use it for progress bars or
+ * other carriage-return-based rewrites.
+ */
+export function logStderr(msg: string): void {
+  process.stderr.write(`${new Date().toISOString()} ${msg}`);
+}
+
+/**
  * Append one line to {cwd}/.memory-headless.log describing a headless-session
  * write/skip decision. Errors are suppressed — logging must never block the hook.
  */

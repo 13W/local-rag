@@ -13,7 +13,7 @@ import {
 } from "../storage.js";
 import type { CodeChunk } from "../types.js";
 import { qd, CODE_VECTORS, colName } from "../qdrant.js";
-import { type FileManifest } from "./git.js";
+import { type FileManifest, listWorktreePaths } from "./git.js";
 
 const BATCH_SIZE  = 32;
 const DESC_CONCURRENCY = 5;
@@ -21,6 +21,31 @@ const IGNORE_DIRS = new Set([
   "node_modules", ".git", "dist", "build", ".next", "coverage",
   "vendor", "charts", "testdata",
 ]);
+
+/**
+ * Retry a transient operation (typically a Qdrant HTTP call) with exponential
+ * backoff. `fetch failed` from undici, DNS hiccups, and ECONNRESET resets
+ * surface as plain `TypeError` / `Error` here; the indexer should ride those
+ * out rather than failing the file.
+ */
+async function _retryTransient<T>(fn: () => Promise<T>, label: string, attempts = 3): Promise<T> {
+  let lastErr: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fn();
+    } catch (err: unknown) {
+      lastErr = err;
+      if (i === attempts - 1) break;
+      const backoffMs = Math.min(2 ** i, 8) * 1000;
+      const msg = err instanceof Error ? err.message : String(err);
+      process.stderr.write(
+        `[indexer] ${label}: ${msg} — retrying in ${backoffMs / 1000}s (attempt ${i + 1}/${attempts})\n`,
+      );
+      await new Promise<void>((r) => setTimeout(r, backoffMs));
+    }
+  }
+  throw lastErr;
+}
 
 export interface CodeIndexerOpts {
   projectId: string;
@@ -40,6 +65,15 @@ export class CodeIndexer {
   private _indexInFlight = new Map<string, Promise<[number, number]>>();
   private _branch = "default";
   private readonly collection = colName("code_chunks");
+
+  // Cached list of git worktree root paths (absolute, normalized) — refreshed
+  // lazily from `<projectRoot>/.git/worktrees/`. Anything under one of these
+  // paths must never be indexed: it's a checkout of another branch that lives
+  // inside the project tree and would otherwise be re-indexed as if it were
+  // source code from the current branch.
+  private worktreePaths: string[] = [];
+  private worktreePathsLoadedAt = 0;
+  private static readonly WORKTREE_CACHE_MS = 30_000;
 
   constructor(opts: CodeIndexerOpts) {
     this.projectId = opts.projectId;
@@ -105,6 +139,24 @@ export class CodeIndexer {
     process.stderr.write(`[indexer] Created collection '${this.collection}' (named vectors)\n`);
   }
 
+  /** Reload the cached list of git-worktree root paths from disk. */
+  refreshWorktreePaths(): void {
+    if (!this.projectRoot) {
+      this.worktreePaths = [];
+    } else {
+      this.worktreePaths = listWorktreePaths(this.projectRoot).map((p) => resolve(p));
+    }
+    this.worktreePathsLoadedAt = Date.now();
+  }
+
+  /** Worktree paths, refreshed at most once per WORKTREE_CACHE_MS. */
+  private getWorktreePaths(): string[] {
+    if (Date.now() - this.worktreePathsLoadedAt > CodeIndexer.WORKTREE_CACHE_MS) {
+      this.refreshWorktreePaths();
+    }
+    return this.worktreePaths;
+  }
+
   /**
    * Returns true if a file should never be indexed regardless of ignore files.
    * Also checks the active GitignoreFilter when called from the watcher.
@@ -115,7 +167,7 @@ export class CodeIndexer {
     const ext   = extname(absPath);
     if (name.startsWith(".")) return true;
     if (!EXTENSIONS.has(ext)) return true;
-    
+
     // Safety check for file size (only if file exists)
     if (ext === ".json" && existsSync(absPath)) {
       try {
@@ -126,6 +178,11 @@ export class CodeIndexer {
     for (const part of parts) {
       if (IGNORE_DIRS.has(part)) return true;
     }
+
+    for (const wt of this.getWorktreePaths()) {
+      if (absPath === wt || absPath.startsWith(wt + "/")) return true;
+    }
+
     if (this.ignFilter?.isIgnored(absPath)) return true;
 
     if (this.includePaths.length > 0) {
@@ -148,6 +205,7 @@ export class CodeIndexer {
     // Build a fresh filter so rules discovered during recursion accumulate.
     const filter = new GitignoreFilter();
     this.ignFilter = filter;          // expose for shouldSkip / watcher
+    this.refreshWorktreePaths();
 
     const results: string[] = [];
 
@@ -388,82 +446,72 @@ export class CodeIndexer {
   }
 
   /**
-   * Returns true if any regular chunk (not a parent container, not a child)
-   * for this file is missing a description — meaning the file was indexed
-   * without --generate-descriptions and needs a re-index.
+   * Scroll Qdrant for chunks in this project missing a `description` payload field.
+   * Uses the `is_empty` filter so we only walk the rows that actually need work.
    */
-  private async missingDescriptions(relPath: string): Promise<boolean> {
-    const result = await qd.scroll(this.collection, {
-      filter: {
-        must: [
-          { key: "file_path",  match: { value: relPath       } },
-          { key: "project_id", match: { value: this.projectId } },
-        ],
-      },
-      limit:        20,
-      with_payload: ["description", "is_parent", "parent_id"],
-      with_vector:  false,
-    });
-    const nonParent = result.points.filter((p) => !(p.payload ?? {})["is_parent"]);
-    return nonParent.length > 0 &&
-      nonParent.some((p) => typeof (p.payload ?? {})["description"] !== "string");
-  }
-
-  /**
-   * Patch chunks that already exist in Qdrant but are missing a description.
-   * Only generates descriptions (+ embeds them) — code vectors are untouched.
-   */
-  private async _patchMissingDescriptions(relPath: string): Promise<void> {
+  private async _scrollMissingDescriptions(limit: number): Promise<Array<{
+    id:        string;
+    content:   string;
+    name:      string;
+    chunkType: string;
+    language:  string;
+    filePath:  string;
+    isChild:   boolean;
+  }>> {
     const toUpdate: Array<{
       id:        string;
       content:   string;
       name:      string;
       chunkType: string;
       language:  string;
+      filePath:  string;
       isChild:   boolean;
     }> = [];
 
-    let offset: string | number | undefined;
-    while (true) {
-      const result = await qd.scroll(this.collection, {
-        filter: {
-          must: [
-            { key: "file_path",  match: { value: relPath       } },
-            { key: "project_id", match: { value: this.projectId } },
-          ],
-        },
-        limit:        500,
-        with_payload: ["description", "content", "name", "chunk_type", "language", "parent_id"],
-        with_vector:  false,
-        ...(offset !== undefined && { offset }),
-      }).catch((): { points: []; next_page_offset: undefined } => ({ points: [], next_page_offset: undefined }));
+    const result = await qd.scroll(this.collection, {
+      filter: {
+        must: [
+          { key: "project_id", match: { value: this.projectId } },
+          { is_empty: { key: "description" } },
+        ],
+      },
+      limit,
+      with_payload: ["content", "name", "chunk_type", "language", "parent_id", "file_path"],
+      with_vector:  false,
+    } as never).catch((): { points: []; next_page_offset: undefined } => ({ points: [], next_page_offset: undefined }));
 
-      for (const p of result.points) {
-        const pl = (p.payload ?? {}) as Record<string, unknown>;
-        if (typeof pl["description"] === "string") continue;
-        toUpdate.push({
-          id:        String(p.id),
-          content:   String(pl["content"]    ?? ""),
-          name:      String(pl["name"]       ?? ""),
-          chunkType: String(pl["chunk_type"] ?? ""),
-          language:  String(pl["language"]   ?? ""),
-          isChild:   typeof pl["parent_id"]  === "string",
-        });
-      }
-
-      const next = (result as { next_page_offset?: string | number | null }).next_page_offset;
-      if (!next) break;
-      offset = next;
+    for (const p of result.points) {
+      const pl = (p.payload ?? {}) as Record<string, unknown>;
+      toUpdate.push({
+        id:        String(p.id),
+        content:   String(pl["content"]    ?? ""),
+        name:      String(pl["name"]       ?? ""),
+        chunkType: String(pl["chunk_type"] ?? ""),
+        language:  String(pl["language"]   ?? ""),
+        filePath:  String(pl["file_path"]  ?? ""),
+        isChild:   typeof pl["parent_id"]  === "string",
+      });
     }
+    return toUpdate;
+  }
 
-    if (toUpdate.length === 0) return;
+  /**
+   * Generate descriptions for a batch of chunks already in Qdrant and write
+   * the resulting payload + description vector back. Returns counters so the
+   * drainer can adapt its sleep interval on widespread failure.
+   */
+  private async _writeDescriptionsBatch(toUpdate: Array<{
+    id: string; content: string; name: string; chunkType: string;
+    language: string; filePath: string; isChild: boolean;
+  }>): Promise<{ written: number; failed: number }> {
+    if (toUpdate.length === 0) return { written: 0, failed: 0 };
 
     const fakeChunks: CodeChunk[] = toUpdate.map((t) => ({
       content:   t.content,
       name:      t.name,
       chunkType: t.chunkType,
       language:  t.language,
-      filePath:  relPath,
+      filePath:  t.filePath,
       signature: "",
       startLine: 0,
       endLine:   0,
@@ -471,15 +519,16 @@ export class CodeIndexer {
     }));
 
     const descriptions = await this.batchGenerateDescriptions(fakeChunks);
+    let failed = 0;
+    for (const d of descriptions) if (!d) failed++;
 
-    // Embed descriptions for non-child chunks (child chunks store description text
-    // but not a description_vector, matching the behaviour of _indexFileImpl).
+    // Embed descriptions for non-child chunks (children store description text
+    // but not a description_vector, matching _indexFileImpl's vector layout).
     const toEmbed: Array<{ idx: number; text: string }> = [];
     for (let i = 0; i < toUpdate.length; i++) {
       const d = descriptions[i];
       if (d && !toUpdate[i]!.isChild) toEmbed.push({ idx: i, text: d });
     }
-
     const descVecs: (number[] | null)[] = new Array(toUpdate.length).fill(null);
     if (toEmbed.length > 0) {
       const vecs = await embedBatch(toEmbed.map((e) => e.text)).catch(() => null);
@@ -490,6 +539,7 @@ export class CodeIndexer {
       }
     }
 
+    let written = 0;
     for (let i = 0; i < toUpdate.length; i++) {
       const { id, isChild } = toUpdate[i]!;
       const desc = descriptions[i];
@@ -500,32 +550,83 @@ export class CodeIndexer {
         payload: { description: desc },
         points:  [id],
         wait:    true,
-      } as never);
+      } as never).catch((err: unknown) => {
+        process.stderr.write(`[drainer] setPayload failed for ${id}: ${String(err)}\n`);
+      });
 
       if (!isChild && vec) {
         await qd.updateVectors(this.collection, {
           points: [{ id, vector: { [CODE_VECTORS.description]: vec } }],
           wait:   true,
-        } as never);
+        } as never).catch((err: unknown) => {
+          process.stderr.write(`[drainer] updateVectors failed for ${id}: ${String(err)}\n`);
+        });
       }
+      written++;
     }
+    return { written, failed };
+  }
+
+  private _drainerRunning = false;
+  private _drainerStop    = false;
+
+  /**
+   * Background loop: scroll Qdrant for chunks lacking a description, generate
+   * them via the LLM, write payload + description_vector back. Runs forever
+   * until stopDrainer() is called or the worker terminates. Idle-sleeps when
+   * the backlog is empty; backs off when the LLM is unavailable.
+   */
+  async runDescriptionDrainer(opts?: { batchSize?: number; idleMs?: number; outageMs?: number }): Promise<void> {
+    if (!this.genDescs)        return;
+    if (this._drainerRunning)  return;
+    this._drainerRunning = true;
+    this._drainerStop    = false;
+
+    const batchSize = opts?.batchSize ?? 50;
+    const idleMs    = opts?.idleMs    ?? 10_000;
+    const outageMs  = opts?.outageMs  ?? 60_000;
+    const sleep     = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+    process.stderr.write(`[drainer] starting for project=${this.projectId}\n`);
+    try {
+      while (!this._drainerStop) {
+        const toUpdate = await this._scrollMissingDescriptions(batchSize);
+        if (toUpdate.length === 0) {
+          await sleep(idleMs);
+          continue;
+        }
+        const { written, failed } = await this._writeDescriptionsBatch(toUpdate);
+        process.stderr.write(`[drainer] batch ${written} written, ${failed} pending (size=${toUpdate.length})\n`);
+        if (written === 0 && failed > 0) {
+          await sleep(outageMs);
+        } else {
+          await sleep(500);
+        }
+      }
+    } finally {
+      this._drainerRunning = false;
+      process.stderr.write(`[drainer] stopped for project=${this.projectId}\n`);
+    }
+  }
+
+  /** Signal the drainer loop to exit at its next iteration. */
+  stopDrainer(): void {
+    this._drainerStop = true;
   }
 
   /** Generate descriptions for a batch of chunks (bounded concurrency). */
   private async batchGenerateDescriptions(chunks: CodeChunk[]): Promise<(string | null)[]> {
     const results: (string | null)[] = new Array(chunks.length).fill(null);
-    let errorLogged = false;
+    let failures = 0;
+    let lastError = "";
     for (let i = 0; i < chunks.length; i += DESC_CONCURRENCY) {
       const slice = chunks.slice(i, i + DESC_CONCURRENCY);
       const descs = await Promise.all(
         slice.map((c) =>
           generateDescription({ content: c.content, name: c.name, chunkType: c.chunkType, language: c.language })
             .catch((err: unknown) => {
-              if (!errorLogged) {
-                errorLogged = true;
-                const msg = err instanceof Error ? err.message : String(err);
-                process.stderr.write(`[indexer] description generation failed: ${msg}\n`);
-              }
+              failures++;
+              lastError = err instanceof Error ? err.message : String(err);
               return null;
             })
         )
@@ -534,6 +635,11 @@ export class CodeIndexer {
         results[i + j] = descs[j] ?? null;
       }
     }
+    if (failures > 0) {
+      process.stderr.write(
+        `[indexer] description batch: ${failures}/${chunks.length} failed, last error: ${lastError}\n`,
+      );
+    }
     return results;
   }
 
@@ -541,10 +647,14 @@ export class CodeIndexer {
     const prev = this._indexInFlight.get(absPath) ?? Promise.resolve([0, 0] as [number, number]);
     const next = prev.catch((): [number, number] => [0, 0]).then(() => this._indexFileImpl(absPath, root));
     this._indexInFlight.set(absPath, next);
-    next.finally(() => {
-      if (this._indexInFlight.get(absPath) === next)
-        this._indexInFlight.delete(absPath);
-    });
+    // The derived `.finally` promise inherits any rejection from `next`; swallow it
+    // here so an `_indexFileImpl` throw is observed only via the returned `next`.
+    next
+      .finally(() => {
+        if (this._indexInFlight.get(absPath) === next)
+          this._indexInFlight.delete(absPath);
+      })
+      .catch(() => undefined);
     return next;
   }
 
@@ -560,10 +670,7 @@ export class CodeIndexer {
 
     const storedHash = await this.getFileHash(relPath);
     if (storedHash === newHash) {
-      if (!this.genDescs) return [0, 0];
-      if (!(await this.missingDescriptions(relPath))) return [0, 0];
-      process.stderr.write(`[indexer] patching missing descriptions: ${relPath}\n`);
-      await this._patchMissingDescriptions(relPath);
+      // Descriptions for already-indexed files are backfilled by runDescriptionDrainer().
       return [0, 0];
     }
 
@@ -576,7 +683,7 @@ export class CodeIndexer {
       return [0, 0];
     }
 
-    await this.deleteFile(relPath);
+    await _retryTransient(() => this.deleteFile(relPath), `deleteFile ${relPath}`);
 
     // ── Dep graph ────────────────────────────────────────────────────────────
     const rawImports      = chunks[0]?.imports ?? [];
@@ -629,41 +736,9 @@ export class CodeIndexer {
       }
     }
 
-    // ── LLM Descriptions ─────────────────────────────────────────────────────
-    // Parent chunks always get descriptions (they hold the summary).
-    // When genDescs is enabled, all chunks (including child) get descriptions.
-    const needsDesc = chunks.map((c) =>
-      c.chunkRole === "parent" || this.genDescs
-    );
-
-    const descTexts: (string | null)[] = new Array(chunks.length).fill(null);
-    const descChunkIndices = chunks
-      .map((_, i) => i)
-      .filter((i) => needsDesc[i]);
-
-    if (descChunkIndices.length > 0) {
-      const descChunks = descChunkIndices.map((i) => chunks[i]!);
-      const descriptions = await this.batchGenerateDescriptions(descChunks);
-      for (let j = 0; j < descChunkIndices.length; j++) {
-        descTexts[descChunkIndices[j]!] = descriptions[j] ?? null;
-      }
-    }
-
-    // Embed descriptions where available
-    const descEmbeds: (number[] | null)[] = new Array(chunks.length).fill(null);
-    const descToEmbed: Array<{ idx: number; text: string }> = [];
-    for (let i = 0; i < chunks.length; i++) {
-      const d = descTexts[i];
-      if (d) descToEmbed.push({ idx: i, text: d });
-    }
-    if (descToEmbed.length > 0) {
-      const descVecs = await embedBatch(descToEmbed.map((d) => d.text)).catch(() => null);
-      if (descVecs) {
-        for (let j = 0; j < descToEmbed.length; j++) {
-          descEmbeds[descToEmbed[j]!.idx] = descVecs[j] ?? null;
-        }
-      }
-    }
+    // Descriptions are generated asynchronously by runDescriptionDrainer().
+    // The hot path here just persists chunks with code vectors; the drainer
+    // backfills description text + description_vector once the LLM responds.
 
     // ── Build Qdrant points ───────────────────────────────────────────────────
     const points: Array<{
@@ -676,17 +751,13 @@ export class CodeIndexer {
       const chunk    = chunks[i]!;
       const id       = chunkIds[i]!;
       const codeVec  = codeEmbeds[i];
-      const descVec  = descEmbeds[i];
 
-      // Parent chunks: description_vector only (no code_vector)
-      // Child chunks: code_vector only (no description_vector)
-      // Regular chunks: code_vector always, description_vector if generated
+      // All chunks get code_vector at index time. Description text and
+      // description_vector are populated later by runDescriptionDrainer().
       const isParent = chunk.chunkRole === "parent";
-      const isChild  = chunk.chunkRole === "child";
 
       const vector: Record<string, number[]> = {};
-      if (!isParent && codeVec) vector[CODE_VECTORS.code]        = codeVec;
-      if (!isChild  && descVec) vector[CODE_VECTORS.description] = descVec;
+      if (codeVec) vector[CODE_VECTORS.code] = codeVec;
 
       // Skip if we have no vectors at all
       if (Object.keys(vector).length === 0) continue;
@@ -708,7 +779,6 @@ export class CodeIndexer {
         file_hash:  newHash,
       };
 
-      if (descTexts[i])  payload["description"]  = descTexts[i];
       if (isParent)      payload["is_parent"]     = true;
       if (parentId)      payload["parent_id"]     = parentId;
       if (childrenIds)   payload["children_ids"]  = childrenIds;
@@ -719,7 +789,7 @@ export class CodeIndexer {
     }
 
     if (points.length === 0) return [0, 0];
-    await qd.upsert(this.collection, { points });
+    await _retryTransient(() => qd.upsert(this.collection, { points }), `qd.upsert ${relPath}`);
     return [points.length, Date.now() - t0];
   }
 

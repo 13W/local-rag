@@ -101,7 +101,7 @@ parentPort.on("message", async (msg) => {
             parentPort!.postMessage({ type: "progress", done, total, chunks });
           }
         });
-        
+
         startWatcher(root, indexer, {
           ignoreInitial: true,
           getState: () => isPaused ? "paused" : "running",
@@ -113,7 +113,13 @@ parentPort.on("message", async (msg) => {
             parentPort!.postMessage({ type: "recordIndex", relPath, chunks, ms, ok, error });
           },
         });
-        
+
+        // Backfill descriptions asynchronously so file walking is never
+        // blocked by LLM availability.
+        void indexer.runDescriptionDrainer().catch((err: unknown) => {
+          parentPort!.postMessage({ type: "error", error: `[drainer] crashed: ${String(err)}` });
+        });
+
         isInitializing = false;
         parentPort!.postMessage({ type: "info", message: `Indexer ready for project ${projectConfig.project_id}` });
       }
@@ -130,10 +136,17 @@ parentPort.on("message", async (msg) => {
 });
 
 process.on("unhandledRejection", (reason) => {
-  parentPort?.postMessage({ type: "error", error: `unhandledRejection: ${String(reason)}` });
-  process.exit(1);
+  // Don't kill the worker on a stray rejection — the watcher and drainer
+  // should keep running. Log the full stack so the cause is debuggable.
+  const detail = reason instanceof Error ? (reason.stack ?? reason.message) : String(reason);
+  process.stderr.write(`[worker] unhandledRejection: ${detail}\n`);
+  parentPort?.postMessage({ type: "error", error: `unhandledRejection: ${detail}` });
 });
 process.on("uncaughtException", (err) => {
-  parentPort?.postMessage({ type: "error", error: `uncaughtException: ${err.stack ?? err.message}` });
+  // An uncaught synchronous throw means state is potentially corrupt — exit
+  // so the manager can surface the failure.
+  const detail = err.stack ?? err.message;
+  process.stderr.write(`[worker] uncaughtException: ${detail}\n`);
+  parentPort?.postMessage({ type: "error", error: `uncaughtException: ${detail}` });
   process.exit(1);
 });
